@@ -486,7 +486,19 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
     const n = graph.nodes.find((x) => x.name === selection.id);
     if (!n) return html`<div class="details"><p class="muted">${selection.id} is not in this view.</p></div>`;
     const s = (status?.nodes ?? []).find((x) => x.name === n.name);
-    const links = graph.links.filter((l) => l.a === n.name || l.b === n.name);
+    const cables = graph.links
+      .filter((l) => l.a === n.name || l.b === n.name)
+      .flatMap((l) => {
+        const near = l.a === n.name;
+        return l.cables.map((c) => ({
+          link: `${l.a}|${l.b}`,
+          local: near ? c.a_port : c.b_port,
+          peer: near ? l.b : l.a,
+          remote: near ? c.b_port : c.a_port,
+          state: c.state,
+        }));
+      })
+      .sort((x, y) => natural(x.local, y.local));
     const clients = graph.clients.filter((c) => c.nodes.includes(n.name));
     return html`<div class="details">
       <h2>${n.name} <span class=${`pill ${n.unreachable ? "down" : n.health}`}>${n.unreachable ? "unreachable" : n.health}</span></h2>
@@ -502,15 +514,17 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
       <h3>Findings</h3>
       <${Findings} findings=${checks.filter((f) => f.node === n.name)} />
       <h3>Cables</h3>
-      <ul class="rows">
-        ${links.map((l) => {
-          const peer = l.a === n.name ? l.b : l.a;
-          return html`<li><a onClick=${() => onSelect({ type: "link", id: `${l.a}|${l.b}` })}>${peer}</a>
-            <span class="muted">${l.count} cable${l.count > 1 ? "s" : ""}</span>
-            <span class=${`pill state-${l.state}`}>${l.state || "?"}</span></li>`;
-        })}
-        ${!links.length && html`<li class="muted">No cables to other nodes.</li>`}
-      </ul>
+      ${cables.length
+        ? html`<table class="grid">
+            <thead><tr><th>local</th><th>peer</th><th>remote</th><th>state</th></tr></thead>
+            <tbody>${cables.map(
+              (c) => html`<tr><td class="mono">${c.local}</td>
+                <td><a onClick=${() => onSelect({ type: "link", id: c.link })}>${c.peer}</a></td>
+                <td class="mono">${c.remote}</td>
+                <td><span class=${`pill state-${c.state}`}>${c.state || "?"}</span></td></tr>`,
+            )}</tbody>
+          </table>`
+        : html`<p class="muted">No cables to other nodes.</p>`}
       ${clients.length > 0 &&
       html`<h3>Clients</h3>
         <ul class="rows">${clients.map(
