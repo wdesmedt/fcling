@@ -1,13 +1,32 @@
 // A table of rows as the server renders them: filtered, sorted, and capped so a big RIB stays quick.
 
-import { html, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
+import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
 import { natural } from "./api.js";
+import { bgpPeerRibPath } from "./bgp-links.js";
+
+export function cellPlain(cell) {
+  if (cell && typeof cell === "object" && cell.kind === "bgp-rx-act-tx") {
+    return `${cell.rx}/${cell.act}/${cell.tx}`;
+  }
+  return String(cell ?? "");
+}
 
 const PAGE = 500;
+const FILTER_WAIT_MS = 150;
+const FILTER_SLICE = 4000;
+
+function useDebounced(value, ms) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return debounced;
+}
 
 /**
  * A column filter as a test of one cell: `text` contains, `!text` does not,
- * `=text` is exactly, `>10` `>=10` `<10` `<=10` compare numbers, `a|b` either. Case does not matter.
+ * `=text` is exactly, or one item of a comma- or line-separated list, `>10` `>=10` `<10` `<=10` compare numbers, `a|b` either. Case does not matter.
  */
 export function cellTest(expression) {
   const text = expression.trim().toLowerCase();
@@ -21,23 +40,26 @@ export function cellTest(expression) {
     const [, op, value] = compare;
     const limit = Number(value);
     return (cell) => {
-      const n = Number.parseFloat(String(cell).replace(/,/g, ""));
+      const n = Number.parseFloat(cellPlain(cell).replace(/,/g, ""));
       if (Number.isNaN(n)) return false;
       return op === ">" ? n > limit : op === ">=" ? n >= limit : op === "<" ? n < limit : n <= limit;
     };
   }
   if (text.startsWith("!")) {
     const not = text.slice(1);
-    return not ? (cell) => !String(cell).toLowerCase().includes(not) : null;
+    return not ? (cell) => !cellPlain(cell).toLowerCase().includes(not) : null;
   }
   if (text.startsWith("=")) {
     const exact = text.slice(1);
-    return (cell) => String(cell).toLowerCase() === exact;
+    return (cell) => {
+      const value = cellPlain(cell).toLowerCase();
+      return value === exact || value.split(/,\s*|\n/).some((item) => item.trim() === exact);
+    };
   }
-  return (cell) => String(cell).toLowerCase().includes(text);
+  return (cell) => cellPlain(cell).toLowerCase().includes(text);
 }
 
-const signature = (row) => row.join("\u0001");
+const signature = (row) => row.map((c) => (typeof c === "object" ? JSON.stringify(c) : c)).join("\u0001");
 
 /**
  * The rows that are new or changed since the rows before, when `flash` - what the rows are
@@ -116,10 +138,28 @@ function useWidths(columns) {
  * (`filter`, `onFilter`) and the column filters (`columnFilters` as {title: expression},
  * `onColumnFilters`) may be lifted, to keep them in the URL.
  */
+function renderCell(cell, go) {
+  if (cell?.kind === "bgp-rx-act-tx" && go) {
+    const link = (which, n, title) =>
+      html`<a class="rib-count" href=${`#/${bgpPeerRibPath(cell, which)}`} title=${title}
+            onClick=${(e) => {
+              e.preventDefault();
+              go(bgpPeerRibPath(cell, which));
+            }}>${n}</a>`;
+    return html`${link("rx", cell.rx, "Received routes")}/${link("act", cell.act, "Active routes")}/${link(
+      "tx",
+      cell.tx,
+      "Advertised routes",
+    )}`;
+  }
+  return cell;
+}
+
 export function DataTable({
   columns,
   rows,
   onNode,
+  go,
   filter: lifted,
   onFilter,
   columnFilters: liftedColumns,
@@ -137,6 +177,11 @@ export function DataTable({
   const setByColumn = onColumnFilters ?? setOwnColumns;
   const [sort, setSort] = useState(null); // {column, descending}
   const [shown, setShown] = useState(PAGE);
+  const debouncedFilter = useDebounced(filter, FILTER_WAIT_MS);
+
+  useEffect(() => {
+    setShown(PAGE);
+  }, [debouncedFilter, byColumn, sort, rows.length]);
 
   const tests = useMemo(
     () =>
@@ -146,21 +191,32 @@ export function DataTable({
     [columns, byColumn],
   );
   const visible = useMemo(() => {
-    const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = debouncedFilter.toLowerCase().split(/\s+/).filter(Boolean);
     let out = rows;
     if (terms.length) {
       out = out.filter((row) => {
-        const text = row.join(" ").toLowerCase();
+        const text = row.map(cellPlain).join(" ").toLowerCase();
         return terms.every((t) => text.includes(t));
       });
     }
-    if (tests.length) out = out.filter((row) => tests.every(([i, test]) => test(row[i])));
+    if (tests.length) {
+      if (out.length > FILTER_SLICE) {
+        const matched = [];
+        for (let i = 0; i < out.length; i += FILTER_SLICE) {
+          const slice = out.slice(i, i + FILTER_SLICE);
+          matched.push(...slice.filter((row) => tests.every(([i, test]) => test(row[i]))));
+        }
+        out = matched;
+      } else {
+        out = out.filter((row) => tests.every(([i, test]) => test(row[i])));
+      }
+    }
     if (sort) {
       const i = sort.column;
       out = [...out].sort((a, b) => natural(a[i], b[i]) * (sort.descending ? -1 : 1));
     }
     return out;
-  }, [rows, filter, tests, sort]);
+  }, [rows, debouncedFilter, tests, sort]);
 
   const sortBy = (i) =>
     setSort(sort?.column === i ? (sort.descending ? null : { column: i, descending: true }) : { column: i, descending: false });
@@ -171,6 +227,23 @@ export function DataTable({
   };
   const filtering = tests.length > 0 || filter.trim();
   const [widths, resize, resetWidths] = useWidths(columns);
+  const scrollRef = useRef(null);
+  const scrollTop = useRef(0);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      scrollTop.current = el.scrollTop;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = scrollTop.current;
+  }, [rows]);
 
   // A node's rows are one group unless sorted otherwise: the node is written once per group.
   const grouped = !sort && !ordered;
@@ -185,13 +258,13 @@ export function DataTable({
         setFilter("");
         setByColumn({});
       }}>Clear filters</button>`}
-      <span class="muted small hint" title="text: contains · !text: does not · =text: exactly · >10, <=5: numbers">
+      <span class="muted small hint" title="text: contains · !text: does not · =text: exactly, or one item of a list · >10, <=5: numbers · a|b: either">
         Column filters: text, !text, =text, ${">10"}, a|b
       </span>
     </div>
     ${rows.length === 0
       ? html`<p class="muted">${empty}</p>`
-      : html`<div class="table-scroll">
+      : html`<div class="table-scroll" ref=${scrollRef}>
           <table class=${`grid report${widths ? " sized" : ""}`}
                  style=${widths ? { width: `${widths.reduce((a, b) => a + b, 0)}px` } : null}>
             ${widths && html`<colgroup>${widths.map((w) => html`<col style=${{ width: `${w}px` }} />`)}</colgroup>`}
@@ -224,7 +297,7 @@ export function DataTable({
                   ? html`<td class="node-cell">${!grouped || first
                       ? onNode && cell !== "-" ? html`<a onClick=${() => onNode(cell)}>${cell}</a>` : cell
                       : ""}</td>`
-                  : html`<td>${cell}</td>`,
+                  : html`<td>${renderCell(cell, go)}</td>`,
               )}</tr>`;
             })}</tbody>
           </table>

@@ -67,7 +67,7 @@ Any report as a table, with the same columns as the CLI (the server renders them
 | `=up` | the cell is exactly it |
 | `>10`, `<=5` | the cell's number is more or less (a cell without one never matches) |
 
-Case doesn't matter, and the filters combine. On a report they are kept in the URL (`#/report/bgp-peers?f.state=!up`), so a filtered table can be bookmarked or shared. Lens tables have the same filters. Click a column to sort, and click a node to open it on the topology. A streamed report refreshes about two seconds after the engine says it changed. A report with parameters (`ipv4-rib` by address) has a form, and is then collected on the spot. The pill next to the title says where the rows came from: `live`, `history` or `collected`. Nodes that could not answer are listed above the table.
+Case doesn't matter, and the filters combine. On a report they are kept in the URL (`#/report/bgp-peers?f.state=!up`), so a filtered table can be bookmarked or shared. Lens tables have the same filters. Click a column to sort, and click a node to open it on the topology. A streamed report refreshes about two seconds after the engine says it changed. A report with parameters (`ipv4-rib` by address) has a form, and is then collected on the spot. The pill next to the title says where the rows came from: `live`, `history` or `collected`. Nodes that could not answer are listed above the table. A BGP RIB is never read on opening, since one peer can send tens of thousands of routes: a link (a bgp-peers Rx/Act/Tx count, say) fills in its form, and **Look up** or **List all routes** reads it.
 
 ## Ask the agent
 

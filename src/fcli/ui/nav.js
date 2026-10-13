@@ -7,6 +7,7 @@ import { REPORT_GROUPS, UNLISTED, reportTitle } from "./reports.js";
 
 const ICONS = {
   topology: "◇",
+  nodes: "▣",
   incidents: "△",
   history: "◷",
   where: "⌖",
@@ -34,11 +35,12 @@ function groups(catalog) {
   return out.filter(([, names]) => names.length);
 }
 
-export function Nav({ route, catalog, incidents, chatOpen, onChat, collapsed }) {
+export function Nav({ route, catalog, status, incidents, chatOpen, onChat, collapsed }) {
   const [find, setFind] = useState("");
   const [closed, setClosed] = useState(() => new Set());
   const errors = incidents.filter((i) => i.severity === "error").length;
   const warnings = incidents.filter((i) => i.severity === "warning").length;
+  const down = (status?.nodes ?? []).filter((n) => n.status !== "live").length;
   const is = (view, name) => route.view === view && (name === undefined || route.name === name);
   const toggle = (title) => {
     const next = new Set(closed);
@@ -49,6 +51,9 @@ export function Nav({ route, catalog, incidents, chatOpen, onChat, collapsed }) 
   return html`<nav class=${`side${collapsed ? " collapsed" : ""}`} aria-label="Views">
     <div class="nav-section">
       <${Item} href="#/topology" active=${is("topology")} icon=${ICONS.topology} label="Topology" />
+      <${Item} href="#/status" active=${is("status")} icon=${ICONS.nodes} label="Nodes">
+        ${down > 0 && html`<span class="nav-counts"><span class="tab-count error">${down}</span></span>`}
+      </${Item}>
       <${Item} href="#/incidents" active=${is("incidents")} icon=${ICONS.incidents} label="Incidents">
         <span class="nav-counts">
           ${errors > 0 && html`<span class="tab-count error">${errors}</span>`}

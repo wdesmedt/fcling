@@ -8,6 +8,7 @@ import { Incidents } from "./incidents.js";
 import { EndpointsView, LENS_VIEWS, PathView, ServiceView, WhereView } from "./lenses.js";
 import { Nav } from "./nav.js";
 import { ReportView } from "./reports.js";
+import { StatusView } from "./status.js";
 import { Details, OverlayControls, Topology, serviceOverlay, useOverlay } from "./topology.js";
 
 /** Reports whose changes can change the topology or the incidents; the rest would only wake them up. */
@@ -26,7 +27,7 @@ function parseHash() {
     return { view, query, selection: type && id.length ? { type, id: decodeURIComponent(id.join("/")) } : null };
   }
   if (view === "lens" || view === "report") return { view, name: decodeURIComponent(rest[0] || ""), query };
-  if (view === "incidents" || view === "history") return { view, query };
+  if (view === "incidents" || view === "history" || view === "status") return { view, query };
   return { view: "topology", query: {}, selection: null };
 }
 
@@ -117,7 +118,7 @@ const Mark = () => html`<svg class="mark-logo" viewBox="0 0 24 24" aria-hidden="
     <circle cx="5.5" cy="16.5" r="1.9" /><circle cx="12" cy="16.5" r="1.9" /><circle cx="18.5" cy="16.5" r="1.9" /></g>
 </svg>`;
 
-function Header({ status, connection, at, onAt, toggleTheme, onMenu, onChat, chatOpen }) {
+function Header({ status, connection, at, onAt, toggleTheme, onMenu, onChat, chatOpen, go }) {
   const nodes = status?.nodes ?? [];
   useEffect(() => {
     document.title = status?.fabric ? `fcling · ${status.fabric}` : "fcling";
@@ -138,10 +139,16 @@ function Header({ status, connection, at, onAt, toggleTheme, onMenu, onChat, cha
       ${status?.fabric && html`<span class="fabric">${status.fabric}</span>`}
     </a>
     <div class="spacer"></div>
-    <span class=${`nodes-state${down.length ? " bad" : ""}`}
-          title=${down.map((n) => `${n.name}: ${n.status}${n.error ? ` (${n.error})` : ""}`).join("\n")}>
+    <a class=${`nodes-state${down.length ? " bad" : ""}`} href="#/status"
+       onClick=${(e) => {
+         e.preventDefault();
+         go("status");
+       }}
+       title=${down.length
+         ? down.map((n) => `${n.name}: ${n.status}${n.error ? ` (${n.error})` : ""}`).join("\n")
+         : "gNMI stream health per node"}>
       ${nodes.length - down.length}/${nodes.length} nodes live
-    </span>
+    </a>
     <${TimeControl} at=${at} onAt=${onAt} />
     <span class=${`connection ${at ? "paused" : connection}`}
           title=${at ? "showing the past: not following changes" : `events: ${connection}`}></span>
@@ -289,6 +296,9 @@ function App() {
                          checks=${data.checks} at=${at} onSelect=${select} />`}
       </aside>
     </main>`;
+  } else if (route.view === "status") {
+    page = html`<main class="page wide"><${StatusView} status=${status} connection=${connection}
+                                                    onNode=${(n) => select({ type: "node", id: n })} /></main>`;
   } else if (route.view === "incidents") {
     page = html`<main class="page"><${Incidents} incidents=${data.incidents} at=${at} started=${status?.started}
                                                  onNode=${(n) => select({ type: "node", id: n })} /></main>`;
@@ -296,7 +306,8 @@ function App() {
     page = html`<main class="page wide"><${HistoryView} ...${shared} catalog=${catalog} /></main>`;
   } else if (route.view === "report") {
     page = catalog.length
-      ? html`<main class="page wide"><${ReportView} key=${route.name} ...${shared} name=${route.name} catalog=${catalog} /></main>`
+      ? html`<main class="page wide"><${ReportView} key=${route.name} ...${shared} name=${route.name} catalog=${catalog}
+                                                      nodeCount=${status?.nodes?.length ?? 0} /></main>`
       : html`<main class="loading">Reading the reports…</main>`;
   } else {
     const views = { where: WhereView, path: PathView, service: ServiceView, endpoints: EndpointsView };
@@ -312,12 +323,12 @@ function App() {
 
   return html`
     <${Header} status=${status} connection=${connection} at=${at} onAt=${setAt} toggleTheme=${toggleTheme}
-               onMenu=${toggleNav} onChat=${() => setChatOpen(!chatOpen)} chatOpen=${chatOpen} />
+               onMenu=${toggleNav} onChat=${() => setChatOpen(!chatOpen)} chatOpen=${chatOpen} go=${go} />
     ${error && html`<div class="banner error">${error}</div>`}
     ${at && html`<div class="banner past">Showing the fabric as the history has it at <b>${at}</b>. Live changes are paused.</div>`}
     <div class=${`shell${navOpen ? " nav-open" : ""}${chatOpen ? " chat-open" : ""}`}>
-      <${Nav} route=${route} catalog=${catalog} incidents=${data?.incidents ?? []} collapsed=${navCollapsed}
-              chatOpen=${chatOpen} onChat=${() => setChatOpen(!chatOpen)} />
+      <${Nav} route=${route} catalog=${catalog} status=${status} incidents=${data?.incidents ?? []}
+              collapsed=${navCollapsed} chatOpen=${chatOpen} onChat=${() => setChatOpen(!chatOpen)} />
       ${page}
       <${ChatPanel} open=${chatOpen} onClose=${() => setChatOpen(false)} context=${describe(route, at)} />
     </div>`;

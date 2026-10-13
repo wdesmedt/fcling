@@ -32,6 +32,41 @@ function url(path, params = {}) {
   return u;
 }
 
+/** Collect a report with progress, partial tables, then the finished answer. */
+export function getReportProgress(name, params = {}, handlers = {}) {
+  const onProgress = typeof handlers === "function" ? handlers : handlers.onProgress;
+  const onPartial = typeof handlers === "function" ? null : handlers.onPartial;
+  return new Promise((resolve, reject) => {
+    const source = new EventSource(url(`/api/reports/${name}`, { ...params, progress: 1, table: 1, token }));
+    const stop = (err) => {
+      source.close();
+      if (err) reject(err);
+    };
+    source.addEventListener("progress", (e) => {
+      const data = JSON.parse(e.data);
+      onProgress?.(data);
+    });
+    source.addEventListener("partial", (e) => {
+      const data = JSON.parse(e.data);
+      onPartial?.(data.answer);
+    });
+    source.addEventListener("result", (e) => {
+      const data = JSON.parse(e.data);
+      source.close();
+      resolve(data.answer);
+    });
+    source.addEventListener("failed", (e) => {
+      const data = JSON.parse(e.data);
+      stop(new ApiError(400, data.error || "collect failed"));
+    });
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED) {
+        stop(new ApiError(0, "connection closed"));
+      }
+    };
+  });
+}
+
 export async function get(path, params = {}) {
   const response = await fetch(url(path, params), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
