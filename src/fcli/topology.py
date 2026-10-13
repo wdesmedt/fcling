@@ -35,7 +35,7 @@ from .fabric import Fabric, out_of_band, parent
 from .lenses.common import Index
 
 #: What the topology reads.
-REQUIRES = ("services", "lldp", "lag", "subif", "es", "ifstats")
+REQUIRES = ("services", "lldp", "lag", "subif", "es", "ifstats", "sys-info", "ni")
 
 #: Top down, as drawn: the WAN core above the gateways out to it.
 TIERS = ("core", "gateway", "spine", "leaf", "unclassified")
@@ -79,6 +79,20 @@ def _rates(fabric: Fabric) -> dict[tuple[str, str], tuple[float, float]]:
     return {(r.node, r.name): (r.out_kbps * 1000, r.in_kbps * 1000) for r in fabric.get("ifstats")}
 
 
+def _system(fabric: Fabric) -> dict[str, dict[str, str]]:
+    """Each node's system0 addresses, the first of each family: what the underlay knows it by."""
+    found: dict[str, dict[str, str]] = {}
+    for r in fabric.get("ni"):
+        if r.ni != "default" or r.interface != "system0.0":
+            continue
+        for prefix in r.prefixes:
+            address = prefix.split("/", 1)[0]
+            family = "ipv6" if ":" in address else "ipv4"
+            if not address.lower().startswith("fe80"):
+                found.setdefault(r.node, {}).setdefault(family, address)
+    return found
+
+
 def _components(nodes: Iterable[str], links: Sequence[dict[str, Any]]) -> list[list[str]]:
     root = {n: n for n in nodes}
 
@@ -109,6 +123,8 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
     tier = _tiers(fabric, index)
     ports = _port_state(fabric)
     rates = _rates(fabric)
+    system = _system(fabric)
+    platform = {r.node: r.type for r in fabric.get("sys-info")}
 
     def out_bps(node: str, port: str) -> float | None:
         rate = rates.get((node, port))
@@ -256,6 +272,9 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
             {
                 "name": n,
                 "tier": tier[n],
+                "type": platform.get(n, ""),
+                "ipv4": system.get(n, {}).get("ipv4", ""),
+                "ipv6": system.get(n, {}).get("ipv6", ""),
                 "unreachable": fabric.unreachable.get(n, ""),
                 "findings": _counts(by_node.get(n, [])),
                 "health": _health(by_node.get(n, [])),

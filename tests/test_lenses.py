@@ -287,3 +287,27 @@ def test_an_uplink_whose_neighbour_went_quiet_is_no_client() -> None:
     ]
     graph = build(dataclasses.replace(fabric(), records=records))
     assert not [c for c in graph["clients"] if "ethernet-1/49" in c["label"]]
+
+
+def test_topology_nodes_carry_their_platform_and_system_addresses() -> None:
+    from fcli.reports.instances import NiInterface
+    from fcli.reports.system import SystemInfo
+
+    records = lens_fabric.records()
+    records["sys-info"] = [SystemInfo(node="leaf1", type="7220 IXR-D2L")]
+    records["ni"] = [
+        NiInterface(
+            node=r.node,
+            ni=r.ni,
+            interface=r.interface,
+            prefixes=(*r.prefixes, "fe80::1/64", "2001:db8::1/128") if r.node == "leaf1" else r.prefixes,
+        )
+        for r in records["ni"]
+    ]
+    nodes = {n["name"]: n for n in build(dataclasses.replace(fabric(), records=records))["nodes"]}
+    assert (nodes["leaf1"]["type"], nodes["leaf1"]["ipv4"], nodes["leaf1"]["ipv6"]) == (
+        "7220 IXR-D2L",
+        "10.0.0.1",
+        "2001:db8::1",
+    )
+    assert (nodes["leaf2"]["type"], nodes["leaf2"]["ipv4"], nodes["leaf2"]["ipv6"]) == ("", "10.0.0.2", "")

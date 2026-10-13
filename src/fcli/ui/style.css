@@ -409,6 +409,17 @@ main.split aside.details-pane {
   font-size: 10.5px;
 }
 
+.node .address {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.node.health-down .sub {
+  fill: var(--down);
+  font-weight: 600;
+}
+
 .badge circle {
   stroke: var(--panel);
   stroke-width: 2;

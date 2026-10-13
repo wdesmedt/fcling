@@ -4,11 +4,13 @@ import { html, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.
 import { ago, bySeverity, get, natural } from "./api.js";
 
 const TIERS = ["core", "gateway", "spine", "leaf", "unclassified"];
-const NODE = { w: 124, h: 42 };
+/** A node's box. Its height is set by each layout: three lines, a fourth where the fabric has IPv6. */
+const NODE = { w: 150, h: 52 };
+const LINE = 13;
 const CLIENT = { w: 118, h: 30 };
 const GAP = 28;
 const CLIENT_GAP = 14;
-const ROW = 118;
+const ROW = 130;
 const PAD = 40;
 const LABEL = 84;
 
@@ -16,6 +18,7 @@ const rowWidth = (n, w, gap) => n * w + Math.max(0, n - 1) * gap;
 
 /** Where everything goes: one block per component, a row per tier, clients under the nodes they hang off. */
 export function layout(graph) {
+  NODE.h = graph.nodes.some((n) => n.ipv6) ? 52 + LINE : 52;
   const tierOf = new Map(graph.nodes.map((n) => [n.name, n.tier]));
   const nodes = new Map();
   const clients = new Map();
@@ -343,8 +346,11 @@ export function Topology({
                            onClick=${pick({ type: "node", id: n.name })} onPointerDown=${(e) => e.stopPropagation()}>
               <rect class="box" width=${NODE.w} height=${NODE.h} rx="8" />
               <rect class="bar" width="5" height=${NODE.h} rx="2" />
-              <text class="name" x="14" y=${down ? 18 : 26}>${n.name}</text>
-              ${down && html`<text class="sub" x="14" y="32">unreachable</text>`}
+              <text class="name" x="14" y="18">${n.name}</text>
+              <text class="sub" x="14" y="31">${down ? "unreachable" : n.type || n.tier}</text>
+              ${[n.ipv4, n.ipv6].filter(Boolean).map(
+                (address, i) => html`<text class="address" x="14" y=${31 + LINE * (i + 1)}>${address.length > 22 ? `${address.slice(0, 21)}…` : address}</text>`,
+              )}
               ${overlay?.marks?.get(n.name) &&
               html`<g class="mark" transform=${`translate(${NODE.w / 2},-14)`}>
                 <rect x=${-(overlay.marks.get(n.name).length * 3.6 + 8)} y="-10" width=${overlay.marks.get(n.name).length * 7.2 + 16}
@@ -353,7 +359,7 @@ export function Topology({
                 <circle r="10" /><text y="4">${errors}</text></g>`}
               ${warnings > 0 && html`<g transform=${`translate(${NODE.w - (errors ? 36 : 14)},0)`} class="badge warning">
                 <circle r="10" /><text y="4">${warnings}</text></g>`}
-              <title>${n.name} (${n.tier})${down ? `: ${n.unreachable || s?.error || "down"}` : ""}</title>
+              <title>${[`${n.name} (${n.tier}${n.type ? `, ${n.type}` : ""})`, n.ipv4, n.ipv6, down ? n.unreachable || s?.error || "down" : ""].filter(Boolean).join("\n")}</title>
             </g>`;
           })}
           ${graph.clients.map((c) => {
