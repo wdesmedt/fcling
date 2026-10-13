@@ -16,6 +16,8 @@ Open `http://127.0.0.1:8765/` for the web UI: topology, incidents, history, lens
 | `-r REPORT` | all reports | stream only these reports; others are collected one-shot when asked |
 | `--api-token` | none on localhost | require a bearer token (`FCLI_API_TOKEN`) |
 
+^C, SIGTERM or SIGHUP stop it within a second, ending any open event streams and closing the history. Requests still running (an agent's answer, say) get 5 seconds to finish. A second signal ends the process within 3 seconds, whatever is still open.
+
 ## Using it from the CLI
 
 ```bash

@@ -30,7 +30,11 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import secrets
+import signal
+import sys
+import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -131,6 +135,18 @@ def create_app(
     """The app serving *engine*, which it runs for as long as it is up when *run_engine*."""
     service = EngineService(engine, fabric)
     query_list = lambda request, name: request.query_params.getlist(name)  # noqa: E731
+    # The open event streams: told to end when the server stops, or it would wait on them for ever.
+    streams: set[asyncio.Queue[dict[str, Any] | None]] = set()
+    closing = False
+
+    def close_streams() -> None:
+        nonlocal closing
+        closing = True
+        for queue in streams:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                if queue.full():
+                    queue.get_nowait()
+            queue.put_nowait(None)
 
     def store() -> Any:
         if engine.store is None:
@@ -241,7 +257,10 @@ def create_app(
                     queue.get_nowait()
                 queue.put_nowait(None)
 
+        if closing:
+            raise _Error(503, "the server is stopping")
         stop = engine.listen(listener)
+        streams.add(queue)
         last = request.headers.get("last-event-id") or request.query_params.get("after")
 
         async def stream() -> AsyncIterator[str]:
@@ -267,6 +286,7 @@ def create_app(
                     yield _sse(event)
             finally:
                 stop()
+                streams.discard(queue)
 
         return _events(stream())
 
@@ -384,7 +404,65 @@ def create_app(
 
         routes.append(Route("/mcp", StreamableHTTPASGIApp(mcp_manager)))
     middleware = [Middleware(_Auth, token=token)] if token else []
-    return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    app.state.close_streams = close_streams
+    return app
+
+
+#: How long open requests - an agent's answer, an MCP call - may take to finish once stopping.
+GRACE = 5
+#: After a second signal: how long before the process exits, whatever is still open.
+FORCE_AFTER = 3.0
+
+
+def run(app: Starlette, host: str, port: int) -> None:
+    """Serve *app* until SIGINT, SIGTERM or SIGHUP; a second one of those stops it at once.
+
+    Uvicorn waits for every connection to close before it stops, and an event
+    stream never closes by itself: so a signal first ends the streams.
+    """
+    import uvicorn
+
+    stops = [s for s in ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK") if hasattr(signal, s)]
+
+    class Server(uvicorn.Server):
+        loop: asyncio.AbstractEventLoop | None = None
+
+        @contextlib.contextmanager
+        def capture_signals(self) -> Any:
+            # Uvicorn's own re-raises the signal once stopped, which ends the process before
+            # the caller closes the history: these are restored and not raised again.
+            if threading.current_thread() is not threading.main_thread():
+                yield
+                return
+            previous = {s: signal.signal(getattr(signal, s), self.handle_exit) for s in stops}
+            try:
+                yield
+            finally:
+                for s, handler in previous.items():
+                    signal.signal(getattr(signal, s), handler)
+
+        async def serve(self, sockets: Any = None) -> None:
+            self.loop = asyncio.get_running_loop()
+            await super().serve(sockets)
+
+        def handle_exit(self, sig: int, frame: Any) -> None:
+            if self.should_exit:
+                # Not uvicorn's force-exit, which skips closing the engine: the same stop,
+                # with the process ended after a while if something still holds it.
+                sys.stderr.write(f"stopping now: exiting in at most {FORCE_AFTER:g}s\n")
+                force = threading.Timer(FORCE_AFTER, os._exit, (1,))
+                force.daemon = True
+                force.start()
+            else:
+                sys.stderr.write("stopping (again to force)\n")
+                super().handle_exit(sig, frame)
+            if self.loop is not None:
+                self.loop.call_soon_threadsafe(app.state.close_streams)
+
+    Server(
+        uvicorn.Config(app, host=host, port=port, log_level="warning", timeout_graceful_shutdown=GRACE)
+    ).run()
 
 
 def _mcp_manager(service: EngineService, host: str) -> Any:

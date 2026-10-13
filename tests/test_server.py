@@ -266,3 +266,58 @@ def test_tables_as_the_cli_renders_them(client: TestClient) -> None:
     # Not an argument of the report or the lens.
     lens = client.get("/api/lenses/where", params={"address": "10.9.9.9", "table": "1"}).json()
     assert lens["rows"][0][:2] == ["-", "not-found"]
+
+
+@pytest.mark.skipif(not hasattr(__import__("signal"), "SIGHUP"), reason="POSIX signals")
+@pytest.mark.parametrize("name", ["SIGINT", "SIGTERM", "SIGHUP"])
+def test_a_signal_stops_the_server_though_event_streams_are_open(name: str) -> None:
+    """Uvicorn waits for every connection to close; an event stream never would by itself."""
+    import signal
+    import socket
+    import subprocess
+    import sys
+
+    child = subprocess.Popen(
+        [sys.executable, "-m", "tests.serve_child"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=Path(__file__).parent.parent,
+    )
+    streams = []
+    try:
+        port = int(child.stdout.readline())
+        remote = Remote(f"http://127.0.0.1:{port}")
+        _until(lambda: _answers(remote), timeout=15)
+        for _ in range(2):
+            s = socket.create_connection(("127.0.0.1", port))
+            s.sendall(f"GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+            received = b""
+            while b"event: status" not in received:
+                chunk = s.recv(65536)
+                assert chunk, received
+                received += chunk
+            streams.append(s)
+        started = time.monotonic()
+        child.send_signal(getattr(signal, name))
+        out, err = child.communicate(timeout=10)
+        assert child.returncode == 0, err
+        # At once: not after the grace that stops whatever else is still open.
+        from fcli.server import GRACE
+
+        assert time.monotonic() - started < GRACE / 2
+        assert "closed" in out  # the history was closed, not cut off
+        assert "stopping" in err
+    finally:
+        for s in streams:
+            s.close()
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def _answers(remote: Remote) -> bool:
+    try:
+        return len(remote.get("/api/reports/bgp-peers")["records"]) == 2
+    except Exception:
+        return False

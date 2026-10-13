@@ -361,10 +361,10 @@ def serve(
 ) -> None:
     """Stream the fabric, keep its history, and serve both over HTTP"""
     try:
-        import uvicorn
+        import uvicorn  # noqa: F401
 
         from .engine import Engine
-        from .server import create_app
+        from .server import create_app, run
         from .store import AsyncStore
     except ImportError as exc:
         raise click.ClickException(f"the server needs its extra: pip install 'fcli[server]' ({exc})") from exc
@@ -389,9 +389,7 @@ def serve(
         highlight=False,
     )
     try:
-        uvicorn.run(
-            create_app(engine, fabric, api_token, host=host), host=host, port=port, log_level="warning"
-        )
+        run(create_app(engine, fabric, api_token, host=host), host, port)
     finally:
         store.close()
 
