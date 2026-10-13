@@ -28,13 +28,13 @@ Where the answers come from:
 
 | Running as | Answers from | History, `at`, drift |
 |---|---|---|
-| `fcli serve` (`/mcp`, `/api/chat`) | the engine's live state | yes |
-| `fcli --server URL mcp` / `ask` | that server, over HTTP | yes |
-| `fcli -t lab.clab.yml mcp` / `ask` | the nodes, one-shot per call | no: those tools say so |
+| `fcling serve` (`/mcp`, `/api/chat`) | the engine's live state | yes |
+| `fcling --server URL mcp` / `ask` | that server, over HTTP | yes |
+| `fcling -t lab.clab.yml mcp` / `ask` | the nodes, one-shot per call | no: those tools say so |
 
 ## MCP
 
-From a running `fcli serve`, over HTTP:
+From a running `fcling serve`, over HTTP:
 
 ```bash
 claude mcp add --transport http fcli http://127.0.0.1:8765/mcp
@@ -43,8 +43,8 @@ claude mcp add --transport http fcli http://127.0.0.1:8765/mcp
 Or over stdio, for clients that start the server themselves:
 
 ```bash
-claude mcp add fcli -- fcli --server http://127.0.0.1:8765 mcp      # through a running server
-claude mcp add fcli -- fcli -t /path/to/lab.clab.yml mcp            # straight from the nodes
+claude mcp add fcli -- fcling --server http://127.0.0.1:8765 mcp      # through a running server
+claude mcp add fcli -- fcling -t /path/to/lab.clab.yml mcp            # straight from the nodes
 ```
 
 Other MCP clients take the same URL, or the same command, in their own configuration. The HTTP endpoint is stateless, so a server restart breaks no client session. A server started with `--api-token` needs the client to send `Authorization: Bearer <token>`.
@@ -52,10 +52,10 @@ Other MCP clients take the same URL, or the same command, in their own configura
 ## The agent
 
 ```bash
-fcli ask "what is wrong, and what changed just before it?"
-fcli ask                                   # keep asking, in a loop
-fcli --server http://127.0.0.1:8765 ask "is leaf3 healthy?"
-fcli --server http://127.0.0.1:8765 ask -C 3f2a9c1b7d4e "and leaf4?"   # continue a conversation
+fcling ask "what is wrong, and what changed just before it?"
+fcling ask                                   # keep asking, in a loop
+fcling --server http://127.0.0.1:8765 ask "is leaf3 healthy?"
+fcling --server http://127.0.0.1:8765 ask -C 3f2a9c1b7d4e "and leaf4?"   # continue a conversation
 ```
 
 The answer streams to stdout as it is written. The tool calls it makes are shown on stderr, followed by the token counts. Through a server the agent runs inside it, using the live state and the history, and the server keeps the conversation: `ask` prints the id to continue it with.
@@ -79,7 +79,7 @@ The provider is `--provider` / `FCLI_LLM_PROVIDER`; otherwise it is the first wi
 | endpoint | `OPENAI_BASE_URL`, `XAI_BASE_URL` |
 | API | `OPENAI_API=chat` for a proxy in front of OpenAI that only speaks Chat Completions |
 
-`fcli serve` uses whatever these variables say in its own environment.
+`fcling serve` uses whatever these variables say in its own environment.
 
 ### Limits
 

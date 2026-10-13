@@ -1,9 +1,9 @@
-"""``fcli``: reports over a fabric, one-shot or from a running engine.
+"""``fcling``: reports over a fabric, one-shot or from a running engine.
 
 Every report in the registry is a command; the options shared by all of them -
 where the inventory comes from, how to reach the nodes, how to print - are on
 the group. With ``--server`` (or ``FCLI_SERVER``) a report is answered by a
-running ``fcli serve`` from what it streams, and ``--at`` asks what it was.
+running ``fcling serve`` from what it streams, and ``--at`` asks what it was.
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ class Settings:
 @click.option("-b", "--box", default="MINIMAL", show_default=True, help="Rich box style of tables")
 @click.option("--timeout", type=float, default=30.0, show_default=True, help="seconds per gNMI call")
 @click.option(
-    "--server", metavar="URL", help="answer from a running `fcli serve`, e.g. http://127.0.0.1:8765"
+    "--server", metavar="URL", help="answer from a running `fcling serve`, e.g. http://127.0.0.1:8765"
 )
 @click.option("--token", help="the bearer token the server was started with")
 @click.option(
@@ -189,7 +189,9 @@ def _collect(
     if at is not None:
         path = default_path(fabric.name)
         if not path.exists():
-            raise click.UsageError(f"no history for {fabric.name}: {path} does not exist (run `fcli serve`)")
+            raise click.UsageError(
+                f"no history for {fabric.name}: {path} does not exist (run `fcling serve`)"
+            )
         try:
             when = parse_time(at)
         except ValueError as exc:
@@ -367,7 +369,9 @@ def serve(
         from .server import create_app, run
         from .store import AsyncStore
     except ImportError as exc:
-        raise click.ClickException(f"the server needs its extra: pip install 'fcli[server]' ({exc})") from exc
+        raise click.ClickException(
+            f"the server needs its extra: pip install 'fcling[server]' ({exc})"
+        ) from exc
     unknown = [n for n in names if n not in REGISTRY]
     if unknown:
         raise click.UsageError(f"no report {', '.join(unknown)}")
@@ -470,7 +474,7 @@ def history(
             raise click.UsageError("--follow needs --server")
         path = default_path(settings.fabric().name)
         if not path.exists():
-            raise click.UsageError(f"no history: {path} does not exist (run `fcli serve`)")
+            raise click.UsageError(f"no history: {path} does not exist (run `fcling serve`)")
         store = Store(path)
         try:
             changes = views.history_with_causes(
@@ -503,7 +507,7 @@ def history(
 def _local_store(settings: Settings) -> Store:
     path = default_path(settings.fabric().name)
     if not path.exists():
-        raise click.UsageError(f"no history: {path} does not exist (run `fcli serve`)")
+        raise click.UsageError(f"no history: {path} does not exist (run `fcling serve`)")
     return Store(path)
 
 
@@ -741,14 +745,14 @@ def _service(settings: Settings) -> Any:
 def mcp_command(settings: Settings) -> None:
     """Serve fcli's tools over MCP on stdio, for an MCP client to start
 
-    With --server it answers from that running `fcli serve` - live state and
-    history; without, from the nodes one-shot. `fcli serve` itself serves the same
+    With --server it answers from that running `fcling serve` - live state and
+    history; without, from the nodes one-shot. `fcling serve` itself serves the same
     tools at /mcp, for clients that connect over HTTP.
     """
     try:
         from .mcp import serve_stdio
     except ImportError as exc:
-        raise click.ClickException(f"MCP needs its extra: pip install 'fcli[mcp]' ({exc})") from exc
+        raise click.ClickException(f"MCP needs its extra: pip install 'fcling[mcp]' ({exc})") from exc
     asyncio.run(serve_stdio(_service(settings), __version__))
 
 
@@ -830,7 +834,9 @@ def ask(
         try:
             from .agent import Agent, Conversation
         except ImportError as exc:
-            raise click.ClickException(f"the agent needs its extra: pip install 'fcli[ai]' ({exc})") from exc
+            raise click.ClickException(
+                f"the agent needs its extra: pip install 'fcling[ai]' ({exc})"
+            ) from exc
         from .llm import ProviderError
 
         service = _service(settings)
@@ -853,7 +859,7 @@ def ask(
     if question:
         turn(question)
         if conversation:
-            err.print(f"[dim]continue with: fcli ask -C {conversation} ...[/]", highlight=False)
+            err.print(f"[dim]continue with: fcling ask -C {conversation} ...[/]", highlight=False)
         if failed:
             sys.exit(1)
         return

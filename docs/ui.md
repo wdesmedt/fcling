@@ -1,10 +1,10 @@
 # The web UI
 
 ```bash
-fcli -t lab.clab.yml serve            # then open http://127.0.0.1:8765/
+fcling -t lab.clab.yml serve            # then open http://127.0.0.1:8765/
 ```
 
-`fcli serve` also serves a web UI at `/`. It reads the same HTTP API as every other client, so it shows the same fabric as the CLI, MCP and the agent. It is plain HTML and JavaScript modules shipped inside the package, with no build step and nothing fetched from the internet.
+`fcling serve` also serves a web UI at `/`. It reads the same HTTP API as every other client, so it shows the same fabric as the CLI, MCP and the agent. It is plain HTML and JavaScript modules shipped inside the package, with no build step and nothing fetched from the internet.
 
 ## Navigation
 
@@ -43,7 +43,7 @@ Everything else dims, so you can see what the selection touches. Drag to pan, sc
 
 ## Incidents
 
-The incidents tab lists the open incidents worst first, as `fcli incidents` does. Open one to see its explanation, its root finding and its consequences, and **what changed just before**. That is the history of the incident's nodes in the 15 minutes before it started, with the configuration commit each change is attributed to. Info incidents are folded away at the bottom, and a node chip opens that node on the topology.
+The incidents tab lists the open incidents worst first, as `fcling incidents` does. Open one to see its explanation, its root finding and its consequences, and **what changed just before**. That is the history of the incident's nodes in the 15 minutes before it started, with the configuration commit each change is attributed to. Info incidents are folded away at the bottom, and a node chip opens that node on the topology.
 
 ## History
 

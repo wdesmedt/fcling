@@ -84,7 +84,7 @@ These are lessons from SR Linux:
 - **`params=[Param("address", "...", short="a")]`** gives the build function a keyword argument and the CLI an option. Parameters shape what the report builds, not what it reads.
 - **`interval=5.0`** takes two samples: `node.previous` and `node.elapsed` are the earlier tree and the seconds between them (see `ifstats`).
 - **`follow=fn(tree, params) -> reads`** fetches data the first reads point at, by key: the next-hop-groups the routes name, the attribute sets of the BGP paths. It is called again until it asks for nothing new. `routing.keyed()` switches to reading the whole table above 2000 keys.
-- **`hidden=True`** keeps a report out of the CLI's command list. Each `bgp-rib` family is one, reached through `fcli bgp-rib -r -t`.
+- **`hidden=True`** keeps a report out of the CLI's command list. Each `bgp-rib` family is one, reached through `fcling bgp-rib -r -t`.
 
 ### Adding a check
 

@@ -8,7 +8,7 @@ What an SR Linux fabric looks like, what is wrong with it, and what changed, str
 This is a ground-up rewrite of [fcli](https://github.com/srl-labs/fcli). It runs on asyncio throughout, uses no Nornir and makes no blocking gNMI calls.
 
 ```bash
-uv tool install 'fcling[server,mcp,ai]'                    # the `fcli` command, from PyPI
+uv tool install 'fcling[server,mcp,ai]'                    # the `fcling` command, from PyPI
 docker run --rm --network host -v "$PWD:/work" ghcr.io/wdesmedt/fcling -t lab.clab.yml bgp-peers
 ```
 
@@ -16,53 +16,53 @@ Or from a checkout:
 
 ```bash
 uv sync
-uv run fcli -t lab.clab.yml bgp-peers
-uv run fcli -t lab.clab.yml -i role=leaf -o json subif -f oper=down
-uv run fcli -c inventory.yml sys-info
-uv run fcli -t lab.clab.yml ipv4-rib -a 10.1.3.99          # longest-prefix match
-uv run fcli -t lab.clab.yml bgp-rib -r evpn -t 5 -d        # with the detail columns
-uv run fcli -t lab.clab.yml ifstats -s 2 -f oper=up        # rates over 2 s
+uv run fcling -t lab.clab.yml bgp-peers
+uv run fcling -t lab.clab.yml -i role=leaf -o json subif -f oper=down
+uv run fcling -c inventory.yml sys-info
+uv run fcling -t lab.clab.yml ipv4-rib -a 10.1.3.99          # longest-prefix match
+uv run fcling -t lab.clab.yml bgp-rib -r evpn -t 5 -d        # with the detail columns
+uv run fcling -t lab.clab.yml ifstats -s 2 -f oper=up        # rates over 2 s
 ```
 
 With the engine running, the same commands answer instantly from what it streams, and can look back:
 
 ```bash
 uv sync --extra server
-uv run fcli -t lab.clab.yml serve                          # streams every node, keeps history
+uv run fcling -t lab.clab.yml serve                          # streams every node, keeps history
 export FCLI_SERVER=http://127.0.0.1:8765
-uv run fcli bgp-peers                                      # live, from the engine
-uv run fcli bgp-peers --at 14:02                           # as it was then
-uv run fcli history --since 1h -r bgp-peers --follow       # what changed, which commit did it, and keeps watching
+uv run fcling bgp-peers                                      # live, from the engine
+uv run fcling bgp-peers --at 14:02                           # as it was then
+uv run fcling history --since 1h -r bgp-peers --follow       # what changed, which commit did it, and keeps watching
 ```
 
 What is wrong, and what changed:
 
 ```bash
-uv run fcli checks                          # every finding, check by check
-uv run fcli incidents -v                    # grouped by root cause, worst first
-uv run fcli incidents --at 14:02            # what was wrong then
-uv run fcli baseline pre-change -m "before the MTU change"
-uv run fcli drift pre-change                # what came, went and changed since
+uv run fcling checks                          # every finding, check by check
+uv run fcling incidents -v                    # grouped by root cause, worst first
+uv run fcling incidents --at 14:02            # what was wrong then
+uv run fcling baseline pre-change -m "before the MTU change"
+uv run fcling drift pre-change                # what came, went and changed since
 ```
 
 Ask, or let your own AI client ask. Both get the same 8 read-only tools: status, reports, incidents, checks, history, drift and baselines.
 
 ```bash
 uv sync --extra server --extra mcp --extra ai
-uv run fcli ask "what is wrong, and what changed just before?"        # the first provider with a key
-uv run fcli ask --provider openai --effort low "is BGP healthy?"
-claude mcp add --transport http fcli http://127.0.0.1:8765/mcp        # MCP over HTTP from `fcli serve`
-claude mcp add fcli -- fcli --server http://127.0.0.1:8765 mcp        # or over stdio
+uv run fcling ask "what is wrong, and what changed just before?"        # the first provider with a key
+uv run fcling ask --provider openai --effort low "is BGP healthy?"
+claude mcp add --transport http fcli http://127.0.0.1:8765/mcp        # MCP over HTTP from `fcling serve`
+claude mcp add fcli -- fcling --server http://127.0.0.1:8765 mcp        # or over stdio
 ```
 
 Questions across the whole fabric, and its shape:
 
 ```bash
-uv run fcli -t lab.clab.yml where 10.1.3.13                        # every place that knows an IP or MAC
-uv run fcli -t lab.clab.yml path leaf1 10.1.3.13 --ni ipvrf-1      # hop by hop, over ECMP and VXLAN
-uv run fcli -t lab.clab.yml service macvrf-102                     # one service on every node, and what disagrees
-uv run fcli -t lab.clab.yml endpoints                              # every attached host
-uv run fcli -t lab.clab.yml topology                               # tiers, cables, clients, segments
+uv run fcling -t lab.clab.yml where 10.1.3.13                        # every place that knows an IP or MAC
+uv run fcling -t lab.clab.yml path leaf1 10.1.3.13 --ni ipvrf-1      # hop by hop, over ECMP and VXLAN
+uv run fcling -t lab.clab.yml service macvrf-102                     # one service on every node, and what disagrees
+uv run fcling -t lab.clab.yml endpoints                              # every attached host
+uv run fcling -t lab.clab.yml topology                               # tiers, cables, clients, segments
 ```
 
 `checks` and `incidents` work without a server too: one-shot from the nodes, or from the local history with `--at`. They exit 1 when there is an error, so they can gate a pipeline.
@@ -76,11 +76,11 @@ Reports: `sys-info`, `config-commits`, `lldp`, `subif`, `lag`, `ifstats`, `ni`, 
 | [Installation and inventory](docs/installation.md) | installing, containerlab and static inventories, selecting nodes, TLS |
 | [Reports](docs/cli.md) | every report, filters, output formats |
 | [The web UI](docs/ui.md) | topology, incidents, history, lenses, reports and the agent in a browser |
-| [The engine](docs/server.md) | `fcli serve`: how it streams, the HTTP API and its events, security |
+| [The engine](docs/server.md) | `fcling serve`: how it streams, the HTTP API and its events, security |
 | [History](docs/history.md) | what is kept, `--at`, commit attribution, baselines and drift |
 | [Lenses and topology](docs/lenses.md) | `where`, `path`, `service`, `endpoints`, `topology`, adding a lens |
 | [Checks and incidents](docs/checks.md) | every check, and how findings are grouped by root cause |
-| [MCP and the agent](docs/ai.md) | the tools, MCP setup, `fcli ask`, Claude, OpenAI and Grok |
+| [MCP and the agent](docs/ai.md) | the tools, MCP setup, `fcling ask`, Claude, OpenAI and Grok |
 | [Architecture](docs/architecture.md) | how it fits together, adding a report or a check, the tests |
 
 ## Architecture
@@ -117,7 +117,7 @@ inventory ──► collect ──► gNMI Get (one per datatype, all nodes at o
 | [views.py](src/fcli/views.py) | One place for fabric-wide answers from any source (the nodes now, the engine, the history at an instant): checks, incidents, drift, and history attributed to the configuration commit that preceded it. |
 | [service.py](src/fcli/service.py) | The questions every surface asks, behind one interface with three implementations: the engine in this process, a running server over HTTP, or the nodes one-shot. |
 | [tools.py](src/fcli/tools.py) | 8 read-only tools over a Service. Inputs are pydantic models that are validated before anything runs; outputs are compact JSON with row limits. One definition serves both MCP clients and the agent. |
-| [mcp.py](src/fcli/mcp.py) | The tools as an MCP server: streamable HTTP at `/mcp` on `fcli serve` (stateless, with DNS-rebinding protection on localhost), or stdio via `fcli mcp`. |
+| [mcp.py](src/fcli/mcp.py) | The tools as an MCP server: streamable HTTP at `/mcp` on `fcling serve` (stateless, with DNS-rebinding protection on localhost), or stdio via `fcling mcp`. |
 | [agent.py](src/fcli/agent.py) | The in-app agent, provider-neutral: streaming, concurrent tool calls, and append-only conversations kept server-side in the provider's own format. |
 | [llm.py](src/fcli/llm.py) | The providers. **Claude** (Anthropic SDK): adaptive thinking, cached prompt and tools, server-side refusal fallback, `claude-opus-5-5` at `medium`. **OpenAI** (Responses API: `store` off, reasoning replayed encrypted), `gpt-5.6-sol`. `OPENAI_API=chat` switches to Chat Completions for proxies. **Grok** (Chat Completions at api.x.ai), `grok-4.6`. The provider is `FCLI_LLM_PROVIDER` or the first one with a key, Claude first; model and effort come from `FCLI_MODEL` / `FCLI_EFFORT` or each provider's own variables. |
 | [server.py](src/fcli/server.py) | Starlette: `/api/status`, `/api/reports[/{name}]` (live, `?at=` or collected on the spot), `/api/history`, `/api/events` (SSE, resumable with `Last-Event-ID`). Bound to localhost; a bearer token when it isn't. |
@@ -152,8 +152,8 @@ The gNMI stubs are generated from the openconfig protos (`make proto`) and commi
 
 1. ~~Inventory, async gNMI client, node tree, recorded fixtures~~
 2. ~~Declared-path reports with typed records, and a one-shot CLI~~. 27 reports are ported, and every one with recorded data matches the original row for row. `services`, `bridge-domains`, `routers` and `endpoints` move to phase 6: the old getters built display strings and web-UI tiles, and these should be typed records over `ni`, `irb`, `es`, `mac` and `arp`/`nd`.
-3. ~~Long-running engine~~: subscriptions planned from the declared paths, record-level changes in SQLite, HTTP/SSE, plus `fcli serve`, `--server`, `--at` and `history`. On both labs the engine's live records match a one-shot run for every report.
+3. ~~Long-running engine~~: subscriptions planned from the declared paths, record-level changes in SQLite, HTTP/SSE, plus `fcling serve`, `--server`, `--at` and `history`. On both labs the engine's live records match a one-shot run for every report.
 4. ~~Checks, incident correlation, timeline and baselines~~. Findings live in the engine and are kept as history. Incidents carry "since". `--at` works for findings and incidents, baselines and drift work through the store, and history is attributed to commits. On both labs the engine's findings match a one-shot run.
-5. ~~MCP served from the engine, and the in-app agent on the same tools~~: `/mcp`, `fcli mcp`, `/api/chat` and `fcli ask`. All of them use the same tools over one Service, with Claude, OpenAI or Grok as the model.
+5. ~~MCP served from the engine, and the in-app agent on the same tools~~: `/mcp`, `fcling mcp`, `/api/chat` and `fcling ask`. All of them use the same tools over one Service, with Claude, OpenAI or Grok as the model.
 6. ~~Lenses and topology~~: `where`, `path`, `service`, `endpoints` and `topology`, from the nodes, the engine or the history. They are served over `/api/lenses` and `/api/topology`, and five more tools use them. `services`, `bridge-domains` and `routers` are typed reports. `endpoints` became a lens, because placing a host needs every node's tables.
-7. ~~Web UI~~, served by `fcli serve` with no build step: a navigation panel; topology, incidents and history; the lenses, with `path` and `where` drawn on the topology; every report as a live table; and the agent beside any view. All of it works live or at an instant.
+7. ~~Web UI~~, served by `fcling serve` with no build step: a navigation panel; topology, incidents and history; the lenses, with `path` and `where` drawn on the topology; every report as a live table; and the agent beside any view. All of it works live or at an instant.

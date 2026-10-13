@@ -2,7 +2,7 @@
 
 ## Install
 
-fcli needs Python 3.11 or later. It is published on PyPI as `fcling` and installs a command named `fcli`:
+fcli needs Python 3.11 or later. It is published on PyPI as `fcling` and installs a command named `fcling`:
 
 ```bash
 uv tool install 'fcling[server,mcp,ai]'    # or: pipx install 'fcling[server,mcp,ai]'
@@ -11,31 +11,31 @@ uv tool install 'fcling[server,mcp,ai]'    # or: pipx install 'fcling[server,mcp
 From a checkout, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install '.[server,mcp,ai]'         # an `fcli` command on your PATH
-uv sync --all-extras && uv run fcli ...    # or run it from the checkout
+uv tool install '.[server,mcp,ai]'         # an `fcling` command on your PATH
+uv sync --all-extras && uv run fcling ...    # or run it from the checkout
 ```
 
-The original, Nornir-based fcli installs a command named `fcli` too. Installing both as tools makes them clash: `uv tool uninstall nornir-srl` first, or use `uv run fcli` from the checkout.
+The command is `fcling` so that it can be installed beside the original, Nornir-based fcli, whose command is `fcli`.
 
 ### Container image
 
-Each release is also an image with every extra, `ghcr.io/wdesmedt/fcling`. Its entrypoint is `fcli`, it works in `/work` and keeps its history in the `/state` volume:
+Each release is also an image with every extra, `ghcr.io/wdesmedt/fcling`. Its entrypoint is `fcling`, it works in `/work` and keeps its history in the `/state` volume:
 
 ```bash
 docker run --rm --network host -v "$PWD:/work" ghcr.io/wdesmedt/fcling -t lab.clab.yml sys-info
-docker run -d --name fcli --network host -v "$PWD:/work" -v fcli-state:/state \
+docker run -d --name fcling --network host -v "$PWD:/work" -v fcli-state:/state \
     ghcr.io/wdesmedt/fcling -t lab.clab.yml serve
 ```
 
-`--network host` lets it reach containerlab nodes by their container names and keeps `fcli serve` on localhost. Without it, publish the port and listen on every address: `-p 8765:8765 ... serve --host 0.0.0.0`. Beyond localhost every call needs a token; fcli makes one up and prints it, or takes yours with `--api-token`.
+`--network host` lets it reach containerlab nodes by their container names and keeps `fcling serve` on localhost. Without it, publish the port and listen on every address: `-p 8765:8765 ... serve --host 0.0.0.0`. Beyond localhost every call needs a token; fcli makes one up and prints it, or takes yours with `--api-token`.
 
 The core package is the one-shot CLI. The extras add the rest:
 
 | Extra | Adds | Needed for |
 |---|---|---|
-| `server` | Starlette, uvicorn | `fcli serve`: the engine, its history, the HTTP API |
-| `mcp` | the MCP SDK | `fcli mcp`, and `/mcp` on `fcli serve` |
-| `ai` | the Anthropic and OpenAI SDKs | `fcli ask`, and `/api/chat` on `fcli serve` |
+| `server` | Starlette, uvicorn | `fcling serve`: the engine, its history, the HTTP API |
+| `mcp` | the MCP SDK | `fcling mcp`, and `/mcp` on `fcling serve` |
+| `ai` | the Anthropic and OpenAI SDKs | `fcling ask`, and `/api/chat` on `fcling serve` |
 
 A command that needs an extra you don't have says which one to install.
 
@@ -46,12 +46,12 @@ Every command needs to know which nodes to talk to. There are three ways.
 ### A containerlab topology
 
 ```bash
-fcli -t lab.clab.yml sys-info
+fcling -t lab.clab.yml sys-info
 ```
 
 fcli reads the topology's SR Linux nodes: kind `srl` or `nokia_srlinux`, or any kind whose image is SR Linux, inherited from groups and defaults as containerlab does. It reaches each one by its container name (`clab-<lab>-<node>`, following the topology's `prefix`). Labels come from the node, its group and the topology defaults, and the credentials are SR Linux's defaults.
 
-If you run fcli from a directory that holds exactly one `*.clab.yml`, `-t` can be left out.
+If you run fcling from a directory that holds exactly one `*.clab.yml`, `-t` can be left out.
 
 ### A static inventory
 
@@ -73,7 +73,7 @@ nodes:
 ```
 
 ```bash
-fcli -c inventory.yml bgp-peers
+fcling -c inventory.yml bgp-peers
 ```
 
 A node without an `address` is reached by its name. An unknown setting is an error, so a typo doesn't go unnoticed.
@@ -87,8 +87,8 @@ With `--server` (or `FCLI_SERVER`) the inventory is the server's, and commands a
 `-i KEY=GLOB` selects nodes by label, or by `name`. Repeat it to AND several filters. Matching is case-insensitive.
 
 ```bash
-fcli -t lab.clab.yml -i role=leaf bgp-peers
-fcli -t lab.clab.yml -i 'name=leaf[12]' -i site=dc1 subif
+fcling -t lab.clab.yml -i role=leaf bgp-peers
+fcling -t lab.clab.yml -i 'name=leaf[12]' -i site=dc1 subif
 ```
 
 A filter that matches no node is an error that lists the labels that do exist.

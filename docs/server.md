@@ -1,12 +1,12 @@
-# The engine: `fcli serve`
+# The engine: `fcling serve`
 
 ```bash
-fcli -t lab.clab.yml serve                 # http://127.0.0.1:8765
+fcling -t lab.clab.yml serve                 # http://127.0.0.1:8765
 ```
 
 Open `http://127.0.0.1:8765/` for the web UI: topology, incidents, history, lenses, reports and the agent ([ui.md](ui.md)).
 
-`fcli serve` keeps every report live. It streams each node over gNMI, re-runs a report only when something it reads changes, and records every change to its records in a history. The CLI, MCP clients and the agent then answer from what it already holds, without asking the nodes.
+`fcling serve` keeps every report live. It streams each node over gNMI, re-runs a report only when something it reads changes, and records every change to its records in a history. The CLI, MCP clients and the agent then answer from what it already holds, without asking the nodes.
 
 | Option | Default | |
 |---|---|---|
@@ -22,10 +22,10 @@ Open `http://127.0.0.1:8765/` for the web UI: topology, incidents, history, lens
 
 ```bash
 export FCLI_SERVER=http://127.0.0.1:8765
-fcli bgp-peers                       # live: answered at once, from the engine
-fcli bgp-peers --at 14:02            # as it was then
-fcli ipv4-rib -a 10.0.0.1            # a non-default parameter: collected on the spot by the server
-fcli -i role=leaf incidents          # the inventory filter is applied by the server
+fcling bgp-peers                       # live: answered at once, from the engine
+fcling bgp-peers --at 14:02            # as it was then
+fcling ipv4-rib -a 10.0.0.1            # a non-default parameter: collected on the spot by the server
+fcling -i role=leaf incidents          # the inventory filter is applied by the server
 ```
 
 Records come back with their full types, so `-o json` and `-f` work exactly as they do one-shot.

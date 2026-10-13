@@ -1,6 +1,6 @@
 # History, baselines and drift
 
-While `fcli serve` runs, every change to every report's records is kept: a BGP session going down, a MAC moving, a finding raised or cleared. That history answers what changed and when, what the fabric looked like at a given time, and how it differs from when it was known to be good.
+While `fcling serve` runs, every change to every report's records is kept: a BGP session going down, a MAC moving, a finding raised or cleared. That history answers what changed and when, what the fabric looked like at a given time, and how it differs from when it was known to be good.
 
 ## What is kept
 
@@ -20,10 +20,10 @@ The history lives in SQLite, by default at `~/.local/state/fcli/<fabric>.db`. It
 ## Reading it
 
 ```bash
-fcli history                          # the last hour
-fcli history --since 2h -r bgp-peers -n leaf1
-fcli history --since 1d -r checks     # findings raised and cleared
-fcli history --follow                 # and keep printing as it happens (needs --server)
+fcling history                          # the last hour
+fcling history --since 2h -r bgp-peers -n leaf1
+fcling history --since 1d -r checks     # findings raised and cleared
+fcling history --follow                 # and keep printing as it happens (needs --server)
 ```
 
 Times are `30m`, `2h`, `1d`, `1w` (that long ago), a time of day (`14:02`, the last time it was that), an ISO date (`2026-10-12T14:02`), or epoch seconds.
@@ -46,8 +46,8 @@ Commits are matched by when the engine saw them, not by the node's clock, which 
 Every report, and `checks` and `incidents`, take `--at`:
 
 ```bash
-fcli bgp-peers --at 14:02
-fcli incidents --at 2h                # what was wrong two hours ago
+fcling bgp-peers --at 14:02
+fcling incidents --at 2h                # what was wrong two hours ago
 ```
 
 The state at an instant is the current state with every later change undone, newest first. It is reconstructed exactly, not sampled, so any instant since the history began works.
@@ -57,17 +57,17 @@ The state at an instant is the current state with every later change undone, new
 A baseline is a name for an instant. It's a pointer into the history, not a copy:
 
 ```bash
-fcli baseline pre-mtu -m "before the MTU change"
-fcli baseline yesterday --at 1d
-fcli baselines
+fcling baseline pre-mtu -m "before the MTU change"
+fcling baseline yesterday --at 1d
+fcling baselines
 ```
 
 Drift is the difference between a baseline (or any time) and now, or another time given with `--to`:
 
 ```bash
-fcli drift pre-mtu
-fcli drift pre-mtu -r subif -r bgp-peers
-fcli drift 14:00 --to 15:00
+fcling drift pre-mtu
+fcling drift pre-mtu -r subif -r bgp-peers
+fcling drift 14:00 --to 15:00
 ```
 
 Drift compares the two end states, record by record, ignoring volatile fields. A session that went down and came back in between is no drift; `history` shows that it happened.

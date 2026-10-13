@@ -1,11 +1,11 @@
 """fcli's tools over MCP: the same tools the in-app agent has, for any MCP client.
 
-``fcli serve`` mounts this at ``/mcp`` (streamable HTTP) over the engine it
+``fcling serve`` mounts this at ``/mcp`` (streamable HTTP) over the engine it
 runs, so a client reads the live state and the history the engine keeps::
 
     claude mcp add --transport http fcli http://127.0.0.1:8765/mcp
 
-``fcli mcp`` serves it over stdio instead, for clients that start their
+``fcling mcp`` serves it over stdio instead, for clients that start their
 servers themselves: answering from a running server with ``--server``, or
 from the nodes one-shot without one.
 """

@@ -1,11 +1,11 @@
 # Checks and incidents
 
 ```bash
-fcli checks                   # every finding
-fcli checks -k bgp_down -k itf_down
-fcli incidents                # grouped by root cause, worst first
-fcli incidents -v             # with every finding of each
-fcli incidents --at 2h        # what was wrong then
+fcling checks                   # every finding
+fcling checks -k bgp_down -k itf_down
+fcling incidents                # grouped by root cause, worst first
+fcling incidents -v             # with every finding of each
+fcling incidents --at 2h        # what was wrong then
 ```
 
 Both work one-shot, through a server with `--server`, or from the history with `--at`. Both exit 1 when there is an error-level finding, so they can gate a pipeline or a change window.

@@ -5,9 +5,9 @@ wrong, what changed - and :class:`Service` is where they are asked. There are
 three answers to who answers them:
 
 * :class:`EngineService` - the engine in this process: live records, kept
-  history. What ``fcli serve`` exposes over HTTP and MCP, and what the agent
+  history. What ``fcling serve`` exposes over HTTP and MCP, and what the agent
   inside it uses.
-* :class:`RemoteService` - a running ``fcli serve``, over HTTP.
+* :class:`RemoteService` - a running ``fcling serve``, over HTTP.
 * :class:`LocalService` - the nodes themselves, one-shot: no history, so
   ``at``, history and drift say so rather than guess.
 
@@ -341,7 +341,7 @@ class EngineService:
 class RemoteService:
     def __init__(self, remote: Remote, filters: Sequence[str] = ()) -> None:
         self.remote = remote
-        #: Inventory filters every question is narrowed by, as ``fcli -i`` gives them.
+        #: Inventory filters every question is narrowed by, as ``fcling -i`` gives them.
         self.filters = list(filters)
 
     async def _get(self, path: str, query: list[tuple[str, str]]) -> Any:
@@ -421,7 +421,7 @@ class RemoteService:
 # --------------------------------------------------------------------------- #
 
 _NO_HISTORY = (
-    "no history here: this answers from the nodes one-shot; run `fcli serve` and point at it with --server"
+    "no history here: this answers from the nodes one-shot; run `fcling serve` and point at it with --server"
 )
 
 

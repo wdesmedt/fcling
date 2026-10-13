@@ -42,22 +42,22 @@ Every report shows only operational state, not configuration.
 Every report takes:
 
 - **`-f COLUMN=REGEX`:** keep only the rows where that column matches, case-insensitive. Repeat it to AND several filters. A column is named by its title or by its record field; `node` works too.
-- **`--at TIME`:** the report as it was then, from the history `fcli serve` keeps. See [history.md](history.md).
+- **`--at TIME`:** the report as it was then, from the history `fcling serve` keeps. See [history.md](history.md).
 
 ```bash
-fcli bgp-peers -f state='^(?!up)'              # every session that is not up
-fcli -i role=leaf mac -f NI=macvrf-1 -f mac=1A:2B
-fcli ipv4-rib -a 10.1.3.99                     # the route each instance has to it
-fcli ifstats -s 2 -f oper=up
+fcling bgp-peers -f state='^(?!up)'              # every session that is not up
+fcling -i role=leaf mac -f NI=macvrf-1 -f mac=1A:2B
+fcling ipv4-rib -a 10.1.3.99                     # the route each instance has to it
+fcling ifstats -s 2 -f oper=up
 ```
 
 ### bgp-rib
 
 ```bash
-fcli bgp-rib                       # EVPN route type 2
-fcli bgp-rib -r evpn -t 5          # IP prefix routes
-fcli bgp-rib -r ipv4 --paths all   # every path received, not only the used ones
-fcli bgp-rib -t 2 -d               # with the detail columns: SoO, tunnel encap, D-PATH, tie-break...
+fcling bgp-rib                       # EVPN route type 2
+fcling bgp-rib -r evpn -t 5          # IP prefix routes
+fcling bgp-rib -r ipv4 --paths all   # every path received, not only the used ones
+fcling bgp-rib -t 2 -d               # with the detail columns: SoO, tunnel encap, D-PATH, tie-break...
 ```
 
 `-r` takes `evpn`, `ipv4`, `ipv6`, `l3vpn-v4`, `l3vpn-v6` (or the YANG names). By default only the paths the node uses, or selected as best, are listed. A route reflector uses none of what it reflects, but still selects a best path, so its routes still appear.
@@ -72,7 +72,7 @@ fcli bgp-rib -t 2 -d               # with the detail columns: SoO, tunnel encap,
 | `csv` | the table's columns, one row per line |
 
 ```bash
-fcli -o json bgp-peers | jq '.[] | select(.state != "established") | .peer'
+fcling -o json bgp-peers | jq '.[] | select(.state != "established") | .peer'
 ```
 
 `-b` picks the table border style (`MINIMAL`, `SIMPLE`, `ROUNDED`...).

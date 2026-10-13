@@ -1,4 +1,4 @@
-"""``fcli serve``'s way of running the app, over a fake target: for the shutdown tests to signal."""
+"""``fcling serve``'s way of running the app, over a fake target: for the shutdown tests to signal."""
 
 from __future__ import annotations
 

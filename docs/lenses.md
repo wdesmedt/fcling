@@ -5,13 +5,13 @@ A report reads one node. A lens asks the whole fabric a question with an argumen
 A lens is a pure function of the fabric, like a check. It declares the reports it reads, so it answers the same way from the nodes, from the engine, or from the history with `--at`. Like a report, it answers in typed records with columns, so `-f`, `-o json|yaml|csv` and the API work the same way for both.
 
 ```bash
-fcli -t lab.clab.yml where 10.1.3.13              # an IP or a MAC
-fcli -t lab.clab.yml path leaf1 10.1.3.13 --ni ipvrf-1
-fcli -t lab.clab.yml path 10.1.5.1 10.1.3.17      # from a host: it enters at its leaf
-fcli -t lab.clab.yml service macvrf-102
-fcli -t lab.clab.yml endpoints -f MAC-VRF=macvrf-101
-fcli -t lab.clab.yml topology
-fcli --server http://127.0.0.1:8765 where AA:C1:AB:73:4C:27 --at 30m
+fcling -t lab.clab.yml where 10.1.3.13              # an IP or a MAC
+fcling -t lab.clab.yml path leaf1 10.1.3.13 --ni ipvrf-1
+fcling -t lab.clab.yml path 10.1.5.1 10.1.3.17      # from a host: it enters at its leaf
+fcling -t lab.clab.yml service macvrf-102
+fcling -t lab.clab.yml endpoints -f MAC-VRF=macvrf-101
+fcling -t lab.clab.yml topology
+fcling --server http://127.0.0.1:8765 where AA:C1:AB:73:4C:27 --at 30m
 ```
 
 ## Services: three reports
@@ -89,7 +89,7 @@ The text output shows the tiers (`~` marks a warning, `!` an error), any cable t
 
 | | now | `--at` |
 |---|---|---|
-| `-t` / `-i` | collected from the nodes | the local history, if `fcli serve` keeps one |
+| `-t` / `-i` | collected from the nodes | the local history, if `fcling serve` keeps one |
 | `--server` | the engine's live state | the server's history |
 
 An `--at` before the history starts is an error that says when it starts. It never returns an empty answer.

@@ -6,7 +6,7 @@ an attribute set it names by index. Sets are kept for nearly every path a
 node holds, tens of thousands on an EVPN fabric, so only the ones the routes
 shown name are read, by key.
 
-Each family is a report of its own, with its own paths and columns; ``fcli
+Each family is a report of its own, with its own paths and columns; ``fcling
 bgp-rib -r evpn -t 2`` picks one. Releases from 24.10 on lay the RIB out
 under an ``afi-safi`` list entry, with the route containers in the singular.
 """

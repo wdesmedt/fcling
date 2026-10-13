@@ -483,7 +483,7 @@ def _mcp_manager(service: EngineService, host: str) -> Any:
 
         from .mcp import build_server
     except ImportError:
-        logger.info("no MCP endpoint: install fcli[mcp]")
+        logger.info("no MCP endpoint: install fcling[mcp]")
         return None
     security = None
     if host in _LOCAL:

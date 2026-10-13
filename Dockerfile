@@ -27,5 +27,5 @@ VOLUME /state
 
 WORKDIR /work
 EXPOSE 8765
-ENTRYPOINT ["fcli"]
+ENTRYPOINT ["fcling"]
 CMD ["--help"]

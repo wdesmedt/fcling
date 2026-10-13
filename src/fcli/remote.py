@@ -1,4 +1,4 @@
-"""Talking to a running ``fcli serve``: the standard library only, so the CLI needs no extra."""
+"""Talking to a running ``fcling serve``: the standard library only, so the CLI needs no extra."""
 
 from __future__ import annotations
 
