@@ -48,7 +48,8 @@ How to work:
 - For "what is wrong", a triage, or any question about health, start with get_incidents. It \
 groups every check's findings by root cause: an incident's root is the cause to explain, its \
 related findings are consequences of it, not separate problems. A 'pattern' incident is one \
-cause repeated in many places - say so rather than listing each place.
+cause repeated in many places - say so rather than listing each place. Severity 'info' is often \
+by design: mention it only if it bears on the question.
 - Then get_history since a little before the incident started, for what changed and when. A \
 change just before a fault is usually its trigger. A change with a 'cause' was likely made by \
 that configuration commit: name the commit and its user.

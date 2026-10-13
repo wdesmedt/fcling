@@ -207,3 +207,15 @@ def test_a_lens_reads_only_what_it_declares(name: str, args: dict) -> None:
         full, records={r: v for r, v in full.records.items() if r in spec.requires}
     )
     assert spec.run(declared, **args) == spec.run(full, **args)
+
+
+def test_information_marks_nothing_unhealthy() -> None:
+    from fcli.checks import Finding
+
+    def health(severity: str) -> str:
+        found = Finding(node="leaf1", check="x", severity=severity, subject="default/10.0.0.10", detail="")
+        (leaf1,) = [n for n in build(fabric(), [found])["nodes"] if n["name"] == "leaf1"]
+        return f"{leaf1['health']} {leaf1['findings']}"
+
+    assert health("info") == "ok {'info': 1}"
+    assert health("warning") == "warning {'warning': 1}"

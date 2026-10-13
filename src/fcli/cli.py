@@ -533,7 +533,7 @@ def _remote_get(settings: Settings, path: str, query: list[tuple[str, str]]) -> 
         raise click.ClickException(str(exc)) from exc
 
 
-_SEVERITY_STYLE = {"error": "bold red", "warning": "yellow"}
+_SEVERITY_STYLE = {"error": "bold red", "warning": "yellow", "info": "dim"}
 
 
 def _dump(data: Any, output: str) -> bool:

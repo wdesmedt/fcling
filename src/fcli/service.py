@@ -209,7 +209,8 @@ class EngineService:
             "streamed": sorted(self.engine.plan.reports),
             "incidents": {
                 "errors": sum(1 for i in found if i["severity"] == "error"),
-                "warnings": sum(1 for i in found if i["severity"] != "error"),
+                "warnings": sum(1 for i in found if i["severity"] == "warning"),
+                "info": sum(1 for i in found if i["severity"] == "info"),
             },
         }
 

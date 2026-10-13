@@ -27,7 +27,9 @@ from .reports.layer2 import EthernetSegment
 ERROR = "error"
 #: Legitimate in some fabrics, a fault in most.
 WARNING = "warning"
-SEVERITY_ORDER = {ERROR: 0, WARNING: 1}
+#: Worth knowing, often by design: shown, but marks nothing as unhealthy.
+INFO = "info"
+SEVERITY_ORDER = {ERROR: 0, WARNING: 1, INFO: 2}
 
 
 class Finding(Record):
@@ -139,7 +141,8 @@ def check_bgp_af_down(fabric: Fabric) -> Iterator[Finding]:
 
 @check("bgp_no_routes", "Established sessions that have received no routes", ["bgp-peers"])
 def check_bgp_no_routes(fabric: Fabric) -> Iterator[Finding]:
-    """Normal on the day a fabric is built; on a running fabric, a policy dropping everything."""
+    """Normal on the day a fabric is built, and for a family no peer sends on - IPv6 over an
+    IPv4-only underlay; otherwise a policy dropping everything. Information, not a fault."""
     for peer in _peers(fabric):
         if text(peer.state) != "established":
             continue
@@ -147,7 +150,7 @@ def check_bgp_no_routes(fabric: Fabric) -> Iterator[Finding]:
             if family.enabled and text(family.oper) != "down" and not family.received:
                 yield _f(
                     "bgp_no_routes",
-                    WARNING,
+                    INFO,
                     peer.node,
                     f"{peer.ni}/{peer.peer}",
                     f"{family.name} is up but has received no routes",

@@ -26,7 +26,7 @@ import os
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from .checks import ERROR, Finding
+from .checks import ERROR, WARNING, Finding
 from .fabric import Fabric, out_of_band, parent
 from .lenses.common import Index
 
@@ -248,6 +248,7 @@ def _counts(findings: Sequence[Finding]) -> dict[str, int]:
 
 
 def _health(findings: Sequence[Finding]) -> str:
+    """Information is shown, but marks nothing as unhealthy."""
     if any(f.severity == ERROR for f in findings):
         return "error"
-    return "warning" if findings else "ok"
+    return "warning" if any(f.severity == WARNING for f in findings) else "ok"

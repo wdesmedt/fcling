@@ -10,6 +10,8 @@ fcli incidents --at 2h        # what was wrong then
 
 Both work one-shot, through a server with `--server`, or from the history with `--at`. Both exit 1 when there is an error-level finding, so they can gate a pipeline or a change window.
 
+A finding is an `error` (the fabric isn't doing what it was built to do), a `warning` (legitimate in some fabrics, a fault in most) or `info` (worth knowing, often by design). An incident takes the worst severity of its findings. Info is listed, but it marks no node or link as unhealthy in the topology.
+
 ## Checks
 
 A check looks at the whole fabric at once. That lets it see what no single node's table shows: a link only one end reports, two leaves configured differently for the same service, the two ends of a BGP session expecting different AS numbers.
@@ -19,7 +21,7 @@ A check looks at the whole fabric at once. That lets it see what no single node'
 | `node_unreachable` | nodes that could not be read, with the reason |
 | `bgp_down` | BGP sessions that are not established |
 | `bgp_af_down` | established sessions with an address family down: the session looks fine, but the family carrying the overlay never came up |
-| `bgp_no_routes` | established families that have received nothing (warning) |
+| `bgp_no_routes` | established families that have received nothing (info: normal for a family no peer sends, such as IPv6 over an IPv4-only underlay) |
 | `bgp_peer_mismatch` | the two ends of a session disagree: peer AS against local AS, families enabled on one end only, BFD on one end only |
 | `itf_down` | subinterfaces enabled but down, with the root cause (a port in ES standby is `down/standby`, which is intended and not a fault) |
 | `itf_errors` | ports dropping or discarding packets during the sample (not on containerlab nodes, where a veth drops traffic all the time) |
