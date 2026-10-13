@@ -1054,6 +1054,9 @@ a.nav-report {
   border-radius: 6px;
   color: var(--text);
   font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 button.menu {

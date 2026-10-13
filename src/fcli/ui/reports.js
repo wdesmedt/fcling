@@ -12,6 +12,50 @@ export const REPORT_GROUPS = [
   ["Services", ["services", "bridge-domains", "routers", "ni", "irb", "mac", "arp", "nd", "es", "es-dest", "vxlan"]],
 ];
 
+/** What the reports are called on screen; the CLI keeps the short names. */
+export const REPORT_TITLES = {
+  "sys-info": "System Information",
+  "config-commits": "Configuration Commits",
+  components: "Components",
+  resources: "Resource Utilization",
+  transceivers: "Transceivers",
+  subif: "Subinterfaces",
+  lag: "LAGs",
+  ifstats: "Interface Rates",
+  lldp: "LLDP Neighbors",
+  "bgp-peers": "BGP Peers",
+  "ipv4-rib": "IPv4 Route Table",
+  "ipv6-rib": "IPv6 Route Table",
+  "static-routes": "Static Routes",
+  "routing-pol": "Routing Policies",
+  bfd: "BFD Sessions",
+  isis: "IS-IS",
+  ospf: "OSPF",
+  "tunnel-table": "Tunnel Table",
+  "bgp-rib-evpn-1": "BGP RIB EVPN Type 1 – A-D",
+  "bgp-rib-evpn-2": "BGP RIB EVPN Type 2 – MAC/IP",
+  "bgp-rib-evpn-3": "BGP RIB EVPN Type 3 – IMET",
+  "bgp-rib-evpn-4": "BGP RIB EVPN Type 4 – ES",
+  "bgp-rib-evpn-5": "BGP RIB EVPN Type 5 – IP Prefix",
+  "bgp-rib-ipv4-unicast": "BGP RIB IPv4 Unicast",
+  "bgp-rib-ipv6-unicast": "BGP RIB IPv6 Unicast",
+  "bgp-rib-l3vpn-ipv4-unicast": "BGP RIB L3VPN IPv4",
+  "bgp-rib-l3vpn-ipv6-unicast": "BGP RIB L3VPN IPv6",
+  services: "Services",
+  "bridge-domains": "Bridge Domains",
+  routers: "Routers",
+  ni: "Network Instances",
+  irb: "IRB Interfaces",
+  mac: "MAC Table",
+  arp: "ARP Table",
+  nd: "IPv6 Neighbors",
+  es: "Ethernet Segments",
+  "es-dest": "Segment Destinations",
+  vxlan: "VXLAN Interfaces",
+};
+
+export const reportTitle = (name) => REPORT_TITLES[name] ?? name;
+
 /** A streamed report's rows change with every poll; refresh no more often than this. */
 const SETTLE_MS = 2000;
 
@@ -66,7 +110,8 @@ export function ReportView({ name, query, go, at, catalog }) {
   const errors = Object.entries(answer?.errors ?? {});
   return html`<div class="report-view">
     <div class="view-head">
-      <h2>${name}</h2>
+      <h2>${reportTitle(name)}</h2>
+      ${reportTitle(name) !== name && html`<code class="muted">${name}</code>`}
       <span class="muted">${spec.help}</span>
       ${answer && html`<span class=${`pill source-${answer.source}`}>${answer.source}</span>`}
     </div>

@@ -3,7 +3,7 @@
 import { html, useState } from "./vendor/preact-htm.module.js";
 import { natural } from "./api.js";
 import { LENS_VIEWS } from "./lenses.js";
-import { REPORT_GROUPS } from "./reports.js";
+import { REPORT_GROUPS, reportTitle } from "./reports.js";
 
 const ICONS = {
   topology: "◇",
@@ -71,7 +71,9 @@ export function Nav({ route, catalog, incidents, chatOpen, onChat, collapsed }) 
                   aria-label="Find a report" />`}
       ${!collapsed &&
       groups(catalog).map(([title, names]) => {
-        const shown = term ? names.filter((n) => n.includes(term)) : names;
+        const shown = term
+          ? names.filter((n) => n.includes(term) || reportTitle(n).toLowerCase().includes(term))
+          : names;
         if (!shown.length) return null;
         const open = term || !closed.has(title);
         return html`<div class="nav-group">
@@ -79,7 +81,7 @@ export function Nav({ route, catalog, incidents, chatOpen, onChat, collapsed }) 
           ${open &&
           shown.map(
             (n) => html`<a class=${`nav-report${is("report", n) ? " active" : ""}`} href=${`#/report/${n}`}
-                           title=${catalog.find((r) => r.name === n)?.help}>${title === "BGP RIB" ? n.replace("bgp-rib-", "") : n}</a>`,
+                           title=${`${n}: ${catalog.find((r) => r.name === n)?.help ?? ""}`}>${title === "BGP RIB" ? reportTitle(n).replace(/^BGP RIB /, "").replace(/^bgp-rib-/, "") : reportTitle(n)}</a>`,
           )}
         </div>`;
       })}
