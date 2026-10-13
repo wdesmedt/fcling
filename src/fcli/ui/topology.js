@@ -129,7 +129,12 @@ function useViewport(box, width, height) {
   return { view, setView, fit };
 }
 
-export function Topology({ graph, status, checks, selected, onSelect }) {
+/**
+ * `overlay`, when given, picks out part of the fabric - a path, where an address is:
+ * `{nodes, links, clients}` as Sets (links as "a|b", sorted), `tunnels` as [{from, to, label}],
+ * and `marks` as Map(node -> text) shown above a node.
+ */
+export function Topology({ graph, status, checks, selected, onSelect, overlay = null, legend = true }) {
   const box = useRef(null);
   const placed = useMemo(() => layout(graph), [graph]);
   const { view, setView, fit } = useViewport(box, placed.width, placed.height);
@@ -170,6 +175,13 @@ export function Topology({ graph, status, checks, selected, onSelect }) {
 
   // What the selection touches: the rest is dimmed.
   const near = useMemo(() => {
+    if (overlay) {
+      return new Set([
+        ...[...overlay.nodes].map((n) => `n:${n}`),
+        ...[...overlay.links].map((l) => `l:${l}`),
+        ...[...overlay.clients].map((c) => `c:${c}`),
+      ]);
+    }
     if (!selected) return null;
     const keep = new Set();
     if (selected.type === "node") {
@@ -189,7 +201,8 @@ export function Topology({ graph, status, checks, selected, onSelect }) {
       for (const n of client?.nodes ?? []) keep.add(`n:${n}`);
     }
     return keep;
-  }, [selected, graph]);
+  }, [selected, graph, overlay]);
+  const traced = (key) => (overlay && near.has(key) ? " traced" : "");
   const dim = (key) => (near && !near.has(key) ? " dim" : "");
   const live = new Map((status?.nodes ?? []).map((n) => [n.name, n]));
 
@@ -219,7 +232,7 @@ export function Topology({ graph, status, checks, selected, onSelect }) {
             const d = linkPath(a, b);
             const trouble = hasTrouble(l.findings);
             const sel = selected?.type === "link" && selected.id === id ? " selected" : "";
-            return html`<g class=${`link state-${l.state || "unknown"} ${trouble}${sel}${dim(`l:${id}`)}`}
+            return html`<g class=${`link state-${l.state || "unknown"} ${trouble}${sel}${dim(`l:${id}`)}${traced(`l:${id}`)}`}
                            onClick=${pick({ type: "link", id })} onPointerDown=${(e) => e.stopPropagation()}>
               <path class="hit" d=${d} />
               <path class="wire" d=${d} />
@@ -227,6 +240,17 @@ export function Topology({ graph, status, checks, selected, onSelect }) {
               html`<text class="count" x=${(a.x + b.x) / 2} y=${(a.y + b.y) / 2}>×${l.count}</text>`}
               <title>${l.a} ↔ ${l.b}: ${l.count} cable${l.count > 1 ? "s" : ""}, ${l.state || "state unknown"}</title>
             </g>`;
+          })}
+          ${(overlay?.tunnels ?? []).map((t) => {
+            const a = placed.nodes.get(t.from);
+            const b = placed.nodes.get(t.to);
+            if (!a || !b || t.from === t.to) return null;
+            // Under the row, between the nodes and their clients: the cables above stay readable.
+            const dip = Math.min(ROW * 0.55, 34 + Math.abs(a.x - b.x) * 0.06);
+            const low = Math.max(a.y, b.y) + NODE.h / 2;
+            const d = `M${a.x},${a.y + NODE.h / 2} C${a.x},${low + dip} ${b.x},${low + dip} ${b.x},${b.y + NODE.h / 2}`;
+            return html`<g class="tunnel"><path d=${d} />
+              <text x=${(a.x + b.x) / 2} y=${low + dip * 0.75 + 4}>${t.label}</text></g>`;
           })}
           ${graph.nodes.map((n) => {
             const p = placed.nodes.get(n.name);
@@ -236,13 +260,17 @@ export function Topology({ graph, status, checks, selected, onSelect }) {
             const sel = selected?.type === "node" && selected.id === n.name ? " selected" : "";
             const errors = n.findings?.error || 0;
             const warnings = n.findings?.warning || 0;
-            return html`<g class=${`node health-${down ? "down" : n.health}${sel}${dim(`n:${n.name}`)}`}
+            return html`<g class=${`node health-${down ? "down" : n.health}${sel}${dim(`n:${n.name}`)}${traced(`n:${n.name}`)}`}
                            transform=${`translate(${p.x - NODE.w / 2},${p.y - NODE.h / 2})`}
                            onClick=${pick({ type: "node", id: n.name })} onPointerDown=${(e) => e.stopPropagation()}>
               <rect class="box" width=${NODE.w} height=${NODE.h} rx="8" />
               <rect class="bar" width="5" height=${NODE.h} rx="2" />
               <text class="name" x="14" y=${down ? 18 : 26}>${n.name}</text>
               ${down && html`<text class="sub" x="14" y="32">unreachable</text>`}
+              ${overlay?.marks?.get(n.name) &&
+              html`<g class="mark" transform=${`translate(${NODE.w / 2},-14)`}>
+                <rect x=${-(overlay.marks.get(n.name).length * 3.6 + 8)} y="-10" width=${overlay.marks.get(n.name).length * 7.2 + 16}
+                      height="18" rx="9" /><text y="3">${overlay.marks.get(n.name)}</text></g>`}
               ${errors > 0 && html`<g transform=${`translate(${NODE.w - 14},0)`} class="badge error">
                 <circle r="10" /><text y="4">${errors}</text></g>`}
               ${warnings > 0 && html`<g transform=${`translate(${NODE.w - (errors ? 36 : 14)},0)`} class="badge warning">
@@ -255,7 +283,7 @@ export function Topology({ graph, status, checks, selected, onSelect }) {
             if (!p) return null;
             const sel = selected?.type === "client" && selected.id === c.id ? " selected" : "";
             const label = c.name || c.attachments[0]?.port || c.id;
-            return html`<g class=${`client${c.esi ? " multihomed" : ""}${sel}${dim(`c:${c.id}`)}`}
+            return html`<g class=${`client${c.esi ? " multihomed" : ""}${sel}${dim(`c:${c.id}`)}${traced(`c:${c.id}`)}`}
                            transform=${`translate(${p.x - CLIENT.w / 2},${p.y - CLIENT.h / 2})`}
                            onClick=${pick({ type: "client", id: c.id })} onPointerDown=${(e) => e.stopPropagation()}>
               <rect width=${CLIENT.w} height=${CLIENT.h} rx="15" />
@@ -270,7 +298,7 @@ export function Topology({ graph, status, checks, selected, onSelect }) {
         <button onClick=${() => setView({ ...view, k: Math.min(4, view.k * 1.25) })} title="Zoom in">+</button>
         <button onClick=${() => setView({ ...view, k: Math.max(0.15, view.k / 1.25) })} title="Zoom out">−</button>
       </div>
-      <${Legend} />
+      ${legend && html`<${Legend} />`}
     </div>
   `;
 }

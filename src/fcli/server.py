@@ -44,7 +44,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import views
+from . import render, views
 from .engine import Engine
 from .inventory import Inventory
 from .service import EngineService, ServiceError, select_nodes
@@ -84,6 +84,22 @@ class _Auth:
                 await JSONResponse({"error": "unauthorized"}, status_code=401)(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+
+#: Query parameters about the answer, not arguments of the report or lens.
+_CONTROL = ("inv", "node", "at", "token", "table")
+
+
+def _table(spec: Any, answer: dict[str, Any], request: Request) -> dict[str, Any]:
+    """With ``?table=1``, the answer also as the CLI's table: column titles, and each row's cells as text."""
+    if request.query_params.get("table") not in ("1", "true", "yes"):
+        return answer
+    records = render.sorted_records([spec.record.model_validate(r) for r in answer["records"]], spec)
+    return {
+        **answer,
+        "columns": ["Node", *(c.title for c in spec.table())],
+        "rows": [[r.node, *(render.text(v) for v in render.cells(spec, r).values())] for r in records],
+    }
 
 
 def _public(path: str) -> bool:
@@ -128,10 +144,12 @@ def create_app(
         return await service.reports()
 
     async def report_records(request: Request) -> Any:
+        from .reports import REGISTRY
+
         name = request.path_params["name"]
-        params = {k: v for k, v in request.query_params.items() if k not in ("inv", "node", "at", "token")}
+        params = {k: v for k, v in request.query_params.items() if k not in _CONTROL}
         try:
-            return await service.records(
+            answer = await service.records(
                 name,
                 params,
                 query_list(request, "inv"),
@@ -140,6 +158,7 @@ def create_app(
             )
         except ServiceError as exc:
             raise _Error(404 if str(exc).startswith("no report") else 400, str(exc)) from exc
+        return _table(REGISTRY[name], answer, request)
 
     def _nodes(request: Request) -> set[str] | None:
         """The nodes an ``inv=`` / ``node=`` query narrows to; ``None`` for all."""
@@ -266,11 +285,15 @@ def create_app(
         ]
 
     async def lens(request: Request) -> Any:
-        args = {k: v for k, v in request.query_params.items() if k not in ("inv", "node", "at", "token")}
+        from .lenses import LENSES
+
+        name = request.path_params["name"]
+        args = {k: v for k, v in request.query_params.items() if k not in _CONTROL}
         try:
-            return await service.lens(request.path_params["name"], args, request.query_params.get("at"))
+            answer = await service.lens(name, args, request.query_params.get("at"))
         except ServiceError as exc:
             raise _Error(404 if str(exc).startswith("no lens") else 400, str(exc)) from exc
+        return _table(LENSES[name], answer, request)
 
     async def topology(request: Request) -> Any:
         return await service.topology(request.query_params.get("at"))

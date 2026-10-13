@@ -1,26 +1,31 @@
-// fcli's web UI: the topology and the incidents, live from `fcli serve` or as they were at an instant.
+// fcli's web UI: the shell - routing, the header, the navigation panel, the agent - around the views.
 
 import { html, render, useEffect, useRef, useState } from "./vendor/preact-htm.module.js";
-import { follow, get } from "./api.js";
+import { follow, get, hashQuery } from "./api.js";
+import { ChatPanel } from "./chat.js";
+import { HistoryView } from "./history.js";
 import { Incidents } from "./incidents.js";
+import { EndpointsView, LENS_VIEWS, PathView, ServiceView, WhereView } from "./lenses.js";
+import { Nav } from "./nav.js";
+import { ReportView } from "./reports.js";
 import { Details, Topology } from "./topology.js";
 
-/** Reports whose changes can change what the UI shows; the rest would only wake it up. */
+/** Reports whose changes can change the topology or the incidents; the rest would only wake them up. */
 const WATCHED = ["checks", "lldp", "subif", "services", "es", "lag"];
 /** Changes come in bursts: refresh once they settle, not once per change. */
 const SETTLE_MS = 1500;
 
 function parseHash() {
-  const [view = "topology", type, ...rest] = location.hash.replace(/^#\/?/, "").split("/");
-  const id = rest.join("/");
-  return {
-    view: view === "incidents" ? "incidents" : "topology",
-    selection: type && id ? { type, id: decodeURIComponent(id) } : null,
-  };
-}
-
-function hashOf(view, selection) {
-  return `#/${view}${selection ? `/${selection.type}/${encodeURIComponent(selection.id)}` : ""}`;
+  const [path] = location.hash.replace(/^#\/?/, "").split("?");
+  const [view = "topology", ...rest] = path.split("/").filter(Boolean);
+  const query = hashQuery();
+  if (view === "topology") {
+    const [type, ...id] = rest;
+    return { view, query, selection: type && id.length ? { type, id: decodeURIComponent(id.join("/")) } : null };
+  }
+  if (view === "lens" || view === "report") return { view, name: decodeURIComponent(rest[0] || ""), query };
+  if (view === "incidents" || view === "history") return { view, query };
+  return { view: "topology", query: {}, selection: null };
 }
 
 function useRoute() {
@@ -30,47 +35,51 @@ function useRoute() {
     addEventListener("hashchange", changed);
     return () => removeEventListener("hashchange", changed);
   }, []);
-  const go = (view, selection = null) => {
-    const hash = hashOf(view, selection);
+  const go = (path) => {
+    const hash = `#/${path}`;
     if (hash !== location.hash) location.hash = hash;
-    else setRoute({ view, selection });
+    else setRoute(parseHash());
   };
   return [route, go];
 }
 
+function stored(key, fallback) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function store(key, value) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // A preference that does not stick is no loss.
+  }
+}
+
 function useTheme() {
-  const [theme, setTheme] = useState(() => {
-    try {
-      return localStorage.getItem("fcli-theme") || "";
-    } catch {
-      return "";
-    }
-  });
+  const [theme, setTheme] = useState(() => stored("fcli-theme", ""));
   useEffect(() => {
     if (theme) document.documentElement.dataset.theme = theme;
     else delete document.documentElement.dataset.theme;
-    try {
-      if (theme) localStorage.setItem("fcli-theme", theme);
-      else localStorage.removeItem("fcli-theme");
-    } catch {
-      // A preference that does not stick is no loss.
-    }
+    store("fcli-theme", theme || null);
   }, [theme]);
-  const next = () => {
+  return () => {
     const dark = theme ? theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     setTheme(dark ? "light" : "dark");
   };
-  return next;
 }
 
 function TimeControl({ at, onAt }) {
   const [text, setText] = useState(at);
   useEffect(() => setText(at), [at]);
-  const submit = (e) => {
+  return html`<form class=${`time${at ? " past" : ""}`} onSubmit=${(e) => {
     e.preventDefault();
     onAt(text.trim());
-  };
-  return html`<form class=${`time${at ? " past" : ""}`} onSubmit=${submit}>
+  }}>
     ${at
       ? html`<span class="when">at <b>${at}</b></span><button type="button" onClick=${() => onAt("")}>Back to live</button>`
       : html`<input value=${text} onInput=${(e) => setText(e.target.value)} placeholder="Go back: 30m, 2h, 14:02"
@@ -78,27 +87,35 @@ function TimeControl({ at, onAt }) {
   </form>`;
 }
 
-function Header({ status, connection, route, go, at, onAt, toggleTheme, incidents }) {
+function Header({ status, connection, at, onAt, toggleTheme, onMenu, onChat, chatOpen }) {
   const nodes = status?.nodes ?? [];
-  const down = nodes.filter((n) => n.status !== "live").length;
-  const errors = incidents.filter((i) => i.severity === "error").length;
-  const warnings = incidents.filter((i) => i.severity === "warning").length;
+  const down = nodes.filter((n) => n.status !== "live");
   return html`<header class="top">
-    <div class="brand"><span class="logo">fcli</span><span class="fabric">${status?.fabric ?? ""}</span></div>
-    <nav>
-      <a class=${route.view === "topology" ? "active" : ""} href="#/topology">Topology</a>
-      <a class=${route.view === "incidents" ? "active" : ""} href="#/incidents">Incidents
-        ${errors > 0 && html`<span class="tab-count error">${errors}</span>`}
-        ${warnings > 0 && html`<span class="tab-count warning">${warnings}</span>`}</a>
-    </nav>
+    <button class="icon menu" onClick=${onMenu} title="Show or hide the navigation" aria-label="Navigation">☰</button>
+    <a class="brand" href="#/topology"><span class="logo">fcli</span><span class="fabric">${status?.fabric ?? ""}</span></a>
     <div class="spacer"></div>
-    <span class=${`nodes-state${down ? " bad" : ""}`} title=${nodes.filter((n) => n.status !== "live").map((n) => `${n.name}: ${n.status}${n.error ? ` (${n.error})` : ""}`).join("\n")}>
-      ${nodes.length - down}/${nodes.length} nodes live
+    <span class=${`nodes-state${down.length ? " bad" : ""}`}
+          title=${down.map((n) => `${n.name}: ${n.status}${n.error ? ` (${n.error})` : ""}`).join("\n")}>
+      ${nodes.length - down.length}/${nodes.length} nodes live
     </span>
     <${TimeControl} at=${at} onAt=${onAt} />
-    <span class=${`connection ${at ? "paused" : connection}`} title=${at ? "showing the past: not following changes" : `events: ${connection}`}></span>
+    <span class=${`connection ${at ? "paused" : connection}`}
+          title=${at ? "showing the past: not following changes" : `events: ${connection}`}></span>
+    <button class=${`ask-button${chatOpen ? " on" : ""}`} onClick=${onChat} title="Ask the agent about the fabric">✦ Ask</button>
     <button class="icon" onClick=${toggleTheme} title="Light or dark">◐</button>
   </header>`;
+}
+
+/** What the user is looking at, in words: the agent is told. */
+function describe(route, at) {
+  let view = route.view;
+  if (route.view === "topology" && route.selection) view = `topology, ${route.selection.type} ${route.selection.id} selected`;
+  else if (route.view === "report") view = `report ${route.name}`;
+  else if (route.view === "lens") {
+    const args = Object.entries(route.query).filter(([k, v]) => v && k !== "q").map(([k, v]) => `${k}=${v}`);
+    view = `${route.name} lens${args.length ? ` ${args.join(" ")}` : ""}`;
+  }
+  return { view, at };
 }
 
 function App() {
@@ -107,8 +124,12 @@ function App() {
   const [at, setAt] = useState("");
   const [status, setStatus] = useState(null);
   const [data, setData] = useState(null);
+  const [catalog, setCatalog] = useState([]);
   const [error, setError] = useState("");
   const [connection, setConnection] = useState("connecting");
+  const [navCollapsed, setNavCollapsed] = useState(() => stored("fcli-nav", "") === "collapsed");
+  const [navOpen, setNavOpen] = useState(false); // narrow screens: the panel over the page
+  const [chatOpen, setChatOpen] = useState(false);
   const [, setTick] = useState(0);
   const atRef = useRef(at);
   atRef.current = at;
@@ -136,6 +157,7 @@ function App() {
   }, [at]);
 
   useEffect(() => {
+    get("/api/reports").then(setCatalog).catch(() => setCatalog([]));
     const schedule = () => {
       if (atRef.current || pending.current) return;
       pending.current = setTimeout(() => {
@@ -166,24 +188,61 @@ function App() {
     };
   }, []);
 
-  const select = (selection) => go("topology", selection);
-  const header = html`<${Header} status=${status} connection=${connection} route=${route} go=${go} at=${at}
-                                 onAt=${setAt} toggleTheme=${toggleTheme} incidents=${data?.incidents ?? []} />`;
-  const banner = error && html`<div class="banner error">${error}</div>`;
+  // A narrow screen's navigation closes once a view is picked.
+  useEffect(() => setNavOpen(false), [location.hash]);
+
+  const toggleNav = () => {
+    if (matchMedia("(max-width: 860px)").matches) {
+      setNavOpen(!navOpen);
+    } else {
+      store("fcli-nav", navCollapsed ? null : "collapsed");
+      setNavCollapsed(!navCollapsed);
+    }
+  };
+  const select = (selection) => go(selection ? `topology/${selection.type}/${encodeURIComponent(selection.id)}` : "topology");
+  const shared = { go, at, graph: data?.topology, status, checks: data?.checks ?? [], query: route.query };
+
+  let page;
   if (!data) {
-    return html`${header}${banner}<main class="loading">${error ? "" : "Reading the fabric…"}</main>`;
-  }
-  return html`${header}${banner}
-    ${at && html`<div class="banner past">Showing the fabric as the history has it at <b>${at}</b>. Live changes are paused.</div>`}
-    ${route.view === "topology"
-      ? html`<main class="split">
-          <${Topology} graph=${data.topology} status=${status} checks=${data.checks}
-                       selected=${route.selection} onSelect=${select} />
-          <aside><${Details} selection=${route.selection} graph=${data.topology} status=${status}
-                             checks=${data.checks} at=${at} onSelect=${select} /></aside>
+    page = html`<main class="loading">${error ? "" : "Reading the fabric…"}</main>`;
+  } else if (route.view === "topology") {
+    page = html`<main class="split">
+      <${Topology} graph=${data.topology} status=${status} checks=${data.checks} selected=${route.selection} onSelect=${select} />
+      <aside class="details-pane"><${Details} selection=${route.selection} graph=${data.topology} status=${status}
+                                              checks=${data.checks} at=${at} onSelect=${select} /></aside>
+    </main>`;
+  } else if (route.view === "incidents") {
+    page = html`<main class="page"><${Incidents} incidents=${data.incidents} at=${at}
+                                                 onNode=${(n) => select({ type: "node", id: n })} /></main>`;
+  } else if (route.view === "history") {
+    page = html`<main class="page wide"><${HistoryView} ...${shared} catalog=${catalog} /></main>`;
+  } else if (route.view === "report") {
+    page = catalog.length
+      ? html`<main class="page wide"><${ReportView} ...${shared} name=${route.name} catalog=${catalog} /></main>`
+      : html`<main class="loading">Reading the reports…</main>`;
+  } else {
+    const views = { where: WhereView, path: PathView, service: ServiceView, endpoints: EndpointsView };
+    const View = views[route.name];
+    const lens = LENS_VIEWS[route.name];
+    page = View
+      ? html`<main class="page wide">
+          <div class="view-head"><h2>${lens.title}</h2><span class="muted">${lens.help}</span></div>
+          <${View} key=${route.name} ...${shared} />
         </main>`
-      : html`<main class="page"><${Incidents} incidents=${data.incidents} at=${at}
-                                              onNode=${(n) => select({ type: "node", id: n })} /></main>`}`;
+      : html`<main class="page"><p class="error-text">No lens ${route.name}.</p></main>`;
+  }
+
+  return html`
+    <${Header} status=${status} connection=${connection} at=${at} onAt=${setAt} toggleTheme=${toggleTheme}
+               onMenu=${toggleNav} onChat=${() => setChatOpen(!chatOpen)} chatOpen=${chatOpen} />
+    ${error && html`<div class="banner error">${error}</div>`}
+    ${at && html`<div class="banner past">Showing the fabric as the history has it at <b>${at}</b>. Live changes are paused.</div>`}
+    <div class=${`body${navOpen ? " nav-open" : ""}${chatOpen ? " chat-open" : ""}`}>
+      <${Nav} route=${route} catalog=${catalog} incidents=${data?.incidents ?? []} collapsed=${navCollapsed}
+              chatOpen=${chatOpen} onChat=${() => setChatOpen(!chatOpen)} />
+      ${page}
+      <${ChatPanel} open=${chatOpen} onClose=${() => setChatOpen(false)} context=${describe(route, at)} />
+    </div>`;
 }
 
 render(html`<${App} />`, document.getElementById("app"));

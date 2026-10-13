@@ -115,4 +115,4 @@ The tests leave every model provider unconfigured, whatever the shell has set.
 ## Not done yet
 
 - **Acknowledging incidents.**
-- **More of the UI:** lenses (`where`, `path` drawn on the topology), reports as tables, history, and the agent.
+- **More of the UI:** baselines and drift, and acknowledging incidents from it.

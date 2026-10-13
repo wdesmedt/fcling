@@ -97,7 +97,7 @@ def keep(report: Report, record: Record, filters: Sequence[tuple[str, re.Pattern
 # --------------------------------------------------------------------------- #
 
 
-def _sorted(records: Iterable[Record], report: Any = None) -> list[Record]:
+def sorted_records(records: Iterable[Record], report: Any = None) -> list[Record]:
     if getattr(report, "ordered", False):
         return list(records)
     return sorted(records, key=lambda r: _natural(r.node))
@@ -120,7 +120,7 @@ def table(
     for column in columns:
         t.add_column(column.title)
     previous = None
-    for record in _sorted(records, report):
+    for record in sorted_records(records, report):
         if previous is not None and record.node != previous:
             t.add_section()
         node = record.node if record.node != previous else ""
@@ -130,11 +130,13 @@ def table(
 
 
 def as_json(records: Iterable[Record], report: Any = None) -> str:
-    return json.dumps([r.model_dump(mode="json") for r in _sorted(records, report)], indent=2)
+    return json.dumps([r.model_dump(mode="json") for r in sorted_records(records, report)], indent=2)
 
 
 def as_yaml(records: Iterable[Record], report: Any = None) -> str:
-    return yaml.safe_dump([r.model_dump(mode="json") for r in _sorted(records, report)], sort_keys=False)
+    return yaml.safe_dump(
+        [r.model_dump(mode="json") for r in sorted_records(records, report)], sort_keys=False
+    )
 
 
 def as_csv(report: Report, records: Iterable[Record], detail: bool = False) -> str:
@@ -142,6 +144,6 @@ def as_csv(report: Report, records: Iterable[Record], detail: bool = False) -> s
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["node", *(" ".join(c.title.split()) for c in columns)])
-    for record in _sorted(records, report):
+    for record in sorted_records(records, report):
         writer.writerow([record.node, *(text(c.value(record)).replace("\n", " ") for c in columns)])
     return out.getvalue()

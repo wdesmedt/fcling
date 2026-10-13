@@ -4,7 +4,7 @@
 fcli -t lab.clab.yml serve                 # http://127.0.0.1:8765
 ```
 
-Open `http://127.0.0.1:8765/` for the web UI: the topology and the incidents, live ([ui.md](ui.md)).
+Open `http://127.0.0.1:8765/` for the web UI: topology, incidents, history, lenses, reports and the agent ([ui.md](ui.md)).
 
 `fcli serve` keeps every report live. It streams each node over gNMI, re-runs a report only when something it reads changes, and records every change to its records in a history. The CLI, MCP clients and the agent then answer from what it already holds, without asking the nodes.
 
@@ -52,12 +52,12 @@ Every endpoint takes `inv=KEY=GLOB` and `node=NAME`, both repeatable, to narrow 
 |---|---|
 | `GET /api/status` | the fabric, its nodes with their state (`connecting`, `syncing`, `live`, `down` with the reason), the streamed reports, and the count of open incidents |
 | `GET /api/reports` | every report: columns, parameters, key and volatile fields, record JSON schema |
-| `GET /api/reports/{name}` | its records. Live; `?at=TIME` from history; with report parameters (`?address=10.0.0.1`), collected on the spot. `source` says which of the three it was. |
+| `GET /api/reports/{name}` | its records. Live; `?at=TIME` from history; with report parameters (`?address=10.0.0.1`), collected on the spot. `source` says which of the three it was. `?table=1` adds `columns` and `rows`: the CLI's table, as text. |
 | `GET /api/checks` | findings, with when each was raised (`?at=`, `?check=`) |
 | `GET /api/incidents` | findings grouped by root cause (`?at=`) |
 | `GET /api/history` | changes, oldest first, each with its likely cause (`since`, `until`, `report`, `limit`, `after`) |
 | `GET /api/lenses` | every lens, with its arguments, columns and record JSON schema |
-| `GET /api/lenses/{name}` | a lens's records: its arguments as query parameters (`?address=10.1.3.13`), `?at=` from history ([lenses.md](lenses.md)) |
+| `GET /api/lenses/{name}` | a lens's records: its arguments as query parameters (`?address=10.1.3.13`), `?at=` from history ([lenses.md](lenses.md)); `?table=1` as for reports |
 | `GET /api/topology` | the fabric as a graph: nodes with tier and health, links, clients, segments, components (`?at=`) |
 | `GET /api/drift` | how the fabric differs from a baseline or time (`from`, `to`, `report`) |
 | `GET/POST /api/baselines`, `DELETE /api/baselines/{name}` | named points in time |

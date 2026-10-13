@@ -22,7 +22,7 @@ function short(value) {
 }
 
 /** One change, as what moved: the fields that differ, or the record that came or went. */
-function Change({ change }) {
+export function Change({ change }) {
   const before = change.before || {};
   const after = change.after || {};
   let what;

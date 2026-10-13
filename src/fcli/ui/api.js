@@ -82,3 +82,52 @@ export function clock(ts) {
 
 export const SEVERITIES = ["error", "warning", "info"];
 export const bySeverity = (a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity);
+
+/** Ask the agent; its events (start, text, tool, tool_result, done, error) as they come. */
+export async function ask(body, onEvent, signal) {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      message = (await response.json()).error || message;
+    } catch {
+      // The status line says enough.
+    }
+    throw new ApiError(response.status, message);
+  }
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    let end;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      const data = block
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => line.slice(6))
+        .join("\n");
+      if (data) onEvent(JSON.parse(data));
+    }
+  }
+}
+
+/** The hash's query: `#/lens/path?source=leaf1` -> {source: "leaf1"}. */
+export function hashQuery() {
+  const i = location.hash.indexOf("?");
+  return i < 0 ? {} : Object.fromEntries(new URLSearchParams(location.hash.slice(i + 1)));
+}
+
+export function withQuery(path, params) {
+  const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+  const text = q.toString();
+  return text ? `${path}?${text}` : path;
+}

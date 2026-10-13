@@ -245,17 +245,24 @@ def test_the_ui_is_served_and_needs_no_token(target: FakeTarget, tmp_path: Path)
     with client:
         page = client.get("/")
         assert page.status_code == 200 and '<script type="module" src="ui/app.js">' in page.text
-        for asset in (
-            "app.js",
-            "api.js",
-            "topology.js",
-            "incidents.js",
-            "style.css",
-            "vendor/preact-htm.module.js",
-        ):
+        from fcli.server import UI
+
+        assets = [p.relative_to(UI).as_posix() for p in UI.rglob("*") if p.is_file()]
+        assert "vendor/preact-htm.module.js" in assets
+        for asset in assets:
             assert client.get(f"/ui/{asset}").status_code == 200, asset
         assert client.get("/ui/nope.js").status_code == 404
         # The data still needs the token.
         assert client.get("/api/topology").status_code == 401
         assert client.get("/api/topology", params={"token": "s3cret"}).status_code == 200
     store.close()
+
+
+def test_tables_as_the_cli_renders_them(client: TestClient) -> None:
+    answer = client.get("/api/reports/bgp-peers", params={"table": "1"}).json()
+    assert answer["columns"][0] == "Node"
+    assert len(answer["rows"]) == len(answer["records"]) == 2
+    assert all(len(row) == len(answer["columns"]) and row[0] == "leaf1" for row in answer["rows"])
+    # Not an argument of the report or the lens.
+    lens = client.get("/api/lenses/where", params={"address": "10.9.9.9", "table": "1"}).json()
+    assert lens["rows"][0][:2] == ["-", "not-found"]
