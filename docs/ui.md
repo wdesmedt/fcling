@@ -23,11 +23,21 @@ The panel on the left holds every view:
 
 The fabric is drawn by tier: spines above leaves, gateways and core above them, and the clients below the leaves they hang off. A multihomed client sits under the middle of its leaves. Each node carries a colour bar for its health, and red and amber badges count its errors and warnings. An unreachable node has a dashed grey outline. Cables are coloured by state: amber for mixed, red for down, and dashed red for a cable the history saw that LLDP no longer reports. `×N` marks parallel cables.
 
+**Show** (top left) picks what the drawing is coloured by:
+
+| | |
+|---|---|
+| **health** | the default: nodes and cables by their findings and state |
+| **traffic** | each half of a cable by what its end sends, and each client's cable by what its leaf sends it: green under 25% of the **link rate**, yellow to 50%, orange to 75%, red above. A dotted half has no rate yet: a rate needs two samples. Hover a cable for both directions. |
+| **service** | one mac-vrf or ip-vrf: the nodes that carry it, the cables between them, and its clients. Everything else dims. |
+
+The link rate is the rate a cable counts as full at (default 10 Mbps). Emulated nodes forward far below their port speed, so it is a scale you set for the colours, not read from the ports. The browser remembers the overlay and the rate. While the drawing shows traffic, the topology is fetched every 10 seconds: rates change with every poll but are not history, so no event announces them. For the same reason, an instant in the past shows the rates as they were last kept, not as they were then.
+
 Click a node, a cable or a client, and the panel on the right shows:
 
 - **Node:** tier, stream state, labels, platform and software, findings, its cables and clients. Info findings are folded away behind one line.
-- **Cable:** each cable's ports and state, and the findings on those ports.
-- **Client:** its segment, and every attachment's node, subinterface, service and VLAN.
+- **Cable:** each cable's ports, state and rate in each direction, and the findings on those ports.
+- **Client:** its segment, and every attachment's node, subinterface, service, VLAN, and rates to and from it.
 
 Everything else dims, so you can see what the selection touches. Drag to pan, scroll to zoom, and press **Fit** to see the whole fabric.
 
