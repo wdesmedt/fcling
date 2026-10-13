@@ -147,13 +147,3 @@ make test lint
 [test_engine.py](tests/test_engine.py) and [test_server.py](tests/test_server.py) stream from that same fake target. They cover the initial sync, refused paths, live changes and deletes, history and `state_at`, and SSE replay over a real uvicorn.
 
 The gNMI stubs are generated from the openconfig protos (`make proto`) and committed.
-
-## Roadmap
-
-1. ~~Inventory, async gNMI client, node tree, recorded fixtures~~
-2. ~~Declared-path reports with typed records, and a one-shot CLI~~. 27 reports are ported, and every one with recorded data matches the original row for row. `services`, `bridge-domains`, `routers` and `endpoints` move to phase 6: the old getters built display strings and web-UI tiles, and these should be typed records over `ni`, `irb`, `es`, `mac` and `arp`/`nd`.
-3. ~~Long-running engine~~: subscriptions planned from the declared paths, record-level changes in SQLite, HTTP/SSE, plus `fcling serve`, `--server`, `--at` and `history`. On both labs the engine's live records match a one-shot run for every report.
-4. ~~Checks, incident correlation, timeline and baselines~~. Findings live in the engine and are kept as history. Incidents carry "since". `--at` works for findings and incidents, baselines and drift work through the store, and history is attributed to commits. On both labs the engine's findings match a one-shot run.
-5. ~~MCP served from the engine, and the in-app agent on the same tools~~: `/mcp`, `fcling mcp`, `/api/chat` and `fcling ask`. All of them use the same tools over one Service, with Claude, OpenAI or Grok as the model.
-6. ~~Lenses and topology~~: `where`, `path`, `service`, `endpoints` and `topology`, from the nodes, the engine or the history. They are served over `/api/lenses` and `/api/topology`, and five more tools use them. `services`, `bridge-domains` and `routers` are typed reports. `endpoints` became a lens, because placing a host needs every node's tables.
-7. ~~Web UI~~, served by `fcling serve` with no build step: a navigation panel; topology, incidents and history; the lenses, with `path` and `where` drawn on the topology; every report as a live table; and the agent beside any view. All of it works live or at an instant.
