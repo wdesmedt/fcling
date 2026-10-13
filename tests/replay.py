@@ -64,3 +64,41 @@ def node_state(path: Path, report: str) -> NodeState:
             elapsed=float(data.get("ifstats_interval") or 1),
         )
     return NodeState(name=data["node"], tree=_tree(calls), models=models)
+
+
+# --------------------------------------------------------------------------- #
+# fcling's own recordings (tests/capture.py)
+# --------------------------------------------------------------------------- #
+
+READS = Path(__file__).parent / "fixtures" / "reads"
+
+
+def reads_recordings() -> list[Path]:
+    return sorted(READS.glob("*/*.json.gz"))
+
+
+def _apply(tree: Tree, call: dict[str, Any]) -> None:
+    for n in call.get("notifications", ()):
+        for path in n["deletes"]:
+            tree.delete(path)
+        for path, value in n["updates"]:
+            tree.update(path, value)
+
+
+def reads_state(data: dict[str, Any], entry: dict[str, Any]) -> NodeState:
+    """The tree a recorded report's own Gets filled, and its earlier sample if it took one."""
+    tree, previous = Tree(), None
+    for call in entry["calls"]:
+        if call.get("sample"):
+            previous = previous or Tree()
+            _apply(previous, call)
+        else:
+            _apply(tree, call)
+    return NodeState(
+        name=data["node"],
+        tree=tree,
+        models=data["models"],
+        labels=data.get("labels", {}),
+        previous=previous,
+        elapsed=entry.get("elapsed"),
+    )

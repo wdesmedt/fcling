@@ -107,6 +107,7 @@ make test lint          # pytest; ruff and mypy
 | | |
 |---|---|
 | [test_release_matrix.py](../tests/test_release_matrix.py) | Every ported report, replayed from the recordings of real fabrics on SR Linux 25.3 to 26.7, must produce row for row what the original, Nornir-based fcli rendered from the same Gets. Add a new report's recorded name to `PORTED`. `python -m tests.rowcounts` shows how many rows each comparison actually covers, so an empty one doesn't pass unnoticed. |
+| [test_release_reads.py](../tests/test_release_reads.py) | The paths fcling itself sends. The old recordings must hold every path a ported report reads (the gaps are listed in `UNRECORDED`). [tests/fixtures/reads](../tests/fixtures/reads/) holds fcling's own exchange with live nodes, recorded by `python -m tests.capture -t lab.clab.yml --node leaf1 --node spine1 --prefix <lab>-`: each report's Gets, follow reads included, and the engine's Subscribes up to their sync. A refused element outside `REFUSED`, or a read that came back empty outside `SILENT`, is a schema change. Every report must replay what it built live, and must still read what was recorded: change a read, and record again. |
 | [fake_gnmi.py](../tests/fake_gnmi.py) | an in-process gNMI target: Get, Subscribe with pushed updates and deletes, TLS, and refusals of unknown paths. It is what the client, engine, server and MCP tests run against. |
 | [test_agent.py](../tests/test_agent.py) | the agent's loop against scripted stand-ins for each provider's API; no key needed, nothing spent |
 
