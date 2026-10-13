@@ -48,7 +48,16 @@ A timeline of every change the engine kept, in the last 15 minutes up to 7 days.
 
 ## Reports
 
-Any report as a table, with the same columns as the CLI (the server renders them, `?table=1`). Filter with words that must all match, click a column to sort, and click a node to open it on the topology. A streamed report refreshes about two seconds after the engine says it changed. A report with parameters (`ipv4-rib` by address) has a form, and is then collected on the spot. The pill next to the title says where the rows came from: `live`, `history` or `collected`. Nodes that could not answer are listed above the table.
+Any report as a table, with the same columns as the CLI (the server renders them, `?table=1`). Filter every row with words that must all match, or one column with its own box under the header:
+
+| | |
+|---|---|
+| `up` | the cell contains it |
+| `!fe80` | the cell does not contain it |
+| `=up` | the cell is exactly it |
+| `>10`, `<=5` | the cell's number is more or less (a cell without one never matches) |
+
+Case doesn't matter, and the filters combine. On a report they are kept in the URL (`#/report/bgp-peers?f.state=!up`), so a filtered table can be bookmarked or shared. Lens tables have the same filters. Click a column to sort, and click a node to open it on the topology. A streamed report refreshes about two seconds after the engine says it changed. A report with parameters (`ipv4-rib` by address) has a form, and is then collected on the spot. The pill next to the title says where the rows came from: `live`, `history` or `collected`. Nodes that could not answer are listed above the table.
 
 ## Ask the agent
 

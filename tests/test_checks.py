@@ -148,3 +148,21 @@ def test_flapping_comes_from_the_history() -> None:
     assert finding.detail.startswith("bgp changed 3 times (established / active / idle)")
     (incident,) = correlate([finding], fabric)
     assert incident.kind == "session"
+
+
+def test_a_containerlab_nodes_memory_is_its_hosts_and_only_information() -> None:
+    from fcli.reports.health import Resource
+
+    nodes = [Node("leaf1", "leaf1", virtual=True), Node("leaf2", "leaf2")]
+    resources = [
+        Resource(node=n, component="control A", name=name, used_percent=97)
+        for n in ("leaf1", "leaf2")
+        for name in ("memory", "ip-lpm-routes")
+    ]
+    found = {(f.node, f.subject): f.severity for f in run_checks(Fabric.of(nodes, {"resources": resources}))}
+    assert found == {
+        ("leaf1", "control A memory"): "info",
+        ("leaf1", "control A ip-lpm-routes"): "error",  # its forwarding table is its own
+        ("leaf2", "control A memory"): "error",
+        ("leaf2", "control A ip-lpm-routes"): "error",
+    }

@@ -39,7 +39,7 @@ A check looks at the whole fabric at once. That lets it see what no single node'
 | `optic_dom` | optics reporting a DOM alarm (error) or warning |
 | `flapping` | something that changed state 3 or more times in 10 minutes: a session, a port, a LAG member, a MAC moving between ports, an IP changing MAC. Needs the history, so only through a server. |
 
-A containerlab node reports its host's memory and CPU, so in a lab `resource_high` describes the machine running the lab, and says so.
+A containerlab node reports its host's memory and CPU, so in a lab `resource_high` on those describes the machine running the lab: it says so, and is `info` rather than a warning or an error. Forwarding tables are the node's own, and keep their severity.
 
 Through a server, every finding has a `since`: when it was raised. Findings are kept in the history like report records, under `checks`, so a finding being raised or cleared is a change you can query.
 

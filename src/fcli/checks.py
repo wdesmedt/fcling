@@ -867,12 +867,14 @@ def check_resource_high(fabric: Fabric) -> Iterator[Finding]:
             continue
         counts = f" ({r.used} used, {r.free} free)" if r.used is not None else ""
         said = f", past the node's {r.threshold}% threshold" if r.threshold is not None else ""
+        severity = ERROR if r.used_percent >= max(RESOURCE_ERROR, warning) else WARNING
         if r.node in fabric.virtual and r.name in ("memory", "cpu"):
-            # Every container on the host says the same: it is the host's.
+            # Every container on the host says the same: it is the host's, not the fabric's.
             said += "; a containerlab node reports its host's"
+            severity = INFO
         yield _f(
             "resource_high",
-            ERROR if r.used_percent >= max(RESOURCE_ERROR, warning) else WARNING,
+            severity,
             r.node,
             f"{r.component} {r.name}",
             f"{r.used_percent}% in use{counts}{said}",

@@ -21,6 +21,16 @@ export function ReportView({ name, query, go, at, catalog }) {
   const [state, setState] = useState({ answer: null, error: "", loading: true });
   const [draft, setDraft] = useState(params);
   const pending = useRef(null);
+  // The filters live in the URL - `q` for the row filter, `f.<column>` for a column's - so a
+  // filtered table can be bookmarked or shared; updating them does not reload the report.
+  const [rowFilter, setRowFilter] = useState(query.q ?? "");
+  const [columnFilters, setColumnFilters] = useState(() =>
+    Object.fromEntries(Object.entries(query).filter(([k]) => k.startsWith("f.")).map(([k, v]) => [k.slice(2), v])),
+  );
+  const keep = (q, columns) => {
+    const filters = Object.fromEntries(Object.entries(columns).map(([title, v]) => [`f.${title}`, v]));
+    history.replaceState(null, "", `#/${withQuery(`report/${name}`, { ...params, q, ...filters })}`);
+  };
   const key = JSON.stringify([name, params, at]);
 
   useEffect(() => {
@@ -79,6 +89,14 @@ export function ReportView({ name, query, go, at, catalog }) {
       : !answer
         ? html`<p class="muted">Reading ${name}…</p>`
         : html`<${DataTable} key=${name} columns=${answer.columns} rows=${answer.rows}
+                             filter=${rowFilter} onFilter=${(q) => {
+                               setRowFilter(q);
+                               keep(q, columnFilters);
+                             }}
+                             columnFilters=${columnFilters} onColumnFilters=${(c) => {
+                               setColumnFilters(c);
+                               keep(rowFilter, c);
+                             }}
                              onNode=${(n) => go(`topology/node/${encodeURIComponent(n)}`)} />`}
   </div>`;
 }

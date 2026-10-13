@@ -218,7 +218,7 @@ function App() {
     page = html`<main class="page wide"><${HistoryView} ...${shared} catalog=${catalog} /></main>`;
   } else if (route.view === "report") {
     page = catalog.length
-      ? html`<main class="page wide"><${ReportView} ...${shared} name=${route.name} catalog=${catalog} /></main>`
+      ? html`<main class="page wide"><${ReportView} key=${route.name} ...${shared} name=${route.name} catalog=${catalog} /></main>`
       : html`<main class="loading">Reading the reports…</main>`;
   } else {
     const views = { where: WhereView, path: PathView, service: ServiceView, endpoints: EndpointsView };
