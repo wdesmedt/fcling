@@ -23,6 +23,11 @@ from ..tree import Tree
 #: one Get of the table beats one naming every entry.
 KEYED_LIMIT = 2000
 
+#: BGP attribute sets: a fabric keeps one per path received - tens of thousands -
+#: where a RIB view uses a fraction. Keyed Gets stay practical further than
+#: next-hop tables before reading the whole attr table wins.
+ATTR_KEYED_LIMIT = 10_000
+
 #: How deep an indirect next-hop is followed looking for a port.
 _MAX_DEPTH = 8
 
@@ -30,10 +35,16 @@ NHG_LIST = "route-table/next-hop-group"
 NH_LIST = "route-table/next-hop"
 
 
-def keyed(list_path: str, entries: set[tuple[str, str]], key: str = "index") -> list[Read]:
+def keyed(
+    list_path: str,
+    entries: set[tuple[str, str]],
+    key: str = "index",
+    *,
+    limit: int = KEYED_LIMIT,
+) -> list[Read]:
     """Reads of *entries* - ``(network-instance, key value)`` - of a list under
     the network-instances, or of the list whole when there are too many."""
-    if len(entries) > KEYED_LIMIT:
+    if len(entries) > limit:
         return [Read(f"/network-instance[name=*]/{list_path}")]
     return [Read(f"/network-instance[name={ni}]/{list_path}[{key}={value}]") for ni, value in sorted(entries)]
 

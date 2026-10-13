@@ -54,10 +54,10 @@ class BgpPeer(Record):
         return next((f for f in self.families if f.name == name), None)
 
 
-def _family_cell(name: str) -> Callable[[BgpPeer], str]:
+def _family_cell(name: str) -> Callable[[BgpPeer], Any]:
     """``received/active/sent``, or the one word that says why not."""
 
-    def cell(peer: BgpPeer) -> str:
+    def cell(peer: BgpPeer) -> Any:
         family = peer.family(name)
         if family is None:
             return "-"
@@ -65,7 +65,16 @@ def _family_cell(name: str) -> Callable[[BgpPeer], str]:
             return "disabled"
         if family.oper == "down":
             return "down"
-        return f"{family.received}/{family.active}/{family.sent}"
+        return {
+            "kind": "bgp-rx-act-tx",
+            "family": name,
+            "node": peer.node,
+            "ni": peer.ni,
+            "peer": peer.peer,
+            "rx": family.received,
+            "act": family.active,
+            "tx": family.sent,
+        }
 
     return cell
 

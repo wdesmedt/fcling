@@ -66,8 +66,9 @@ _UNKNOWN_ELEMENT = UNKNOWN_ELEMENT
 #: the stream is gone rather than that nothing changed.
 HEARTBEAT = Read("/system/information/current-datetime", mode=SubscriptionMode.SAMPLE, sample_interval=10)
 
-#: Seconds without the heartbeat before a stream counts as stalled.
-STALE_AFTER = 35.0
+#: Seconds without the heartbeat before a stream counts as stalled. A leaf
+#: under load may pause SAMPLE updates while a large Get runs on another session.
+STALE_AFTER = 55.0
 
 #: Seconds a subscription has to deliver its initial sync.
 SYNC_TIMEOUT = 300.0
@@ -102,9 +103,14 @@ class Plan:
     def __init__(self, reports: Iterable[Report]) -> None:
         self.reports = {r.name: r for r in reports}
         on_change = {
-            r for rep in self.reports.values() for r in rep.reads if r.mode is not SubscriptionMode.SAMPLE
+            r
+            for rep in self.reports.values()
+            for r in rep.planned_reads()
+            if r.mode is not SubscriptionMode.SAMPLE
         }
-        polled = {r for rep in self.reports.values() for r in rep.reads if r.mode is SubscriptionMode.SAMPLE}
+        polled = {
+            r for rep in self.reports.values() for r in rep.planned_reads() if r.mode is SubscriptionMode.SAMPLE
+        }
         #: A read another one delivers in full is left out of the request.
         self.streamed = sorted(
             (r for r in on_change if not any(o != r and _covers(o, r) for o in on_change)),
@@ -112,20 +118,31 @@ class Plan:
         )
         self.polled = sorted(polled, key=lambda r: r.path)
         self._patterns = [
-            (name, [gpath.parse(r.path) for r in rep.reads]) for name, rep in self.reports.items()
+            (name, [gpath.parse(r.path) for r in rep.planned_reads()]) for name, rep in self.reports.items()
         ]
         #: Reports to re-run after a poll: they read polled paths or follow reads.
         self.after_poll = frozenset(
-            name for name, rep in self.reports.items() if rep.follow or any(r in polled for r in rep.reads)
+            name for name, rep in self.reports.items() if rep.follow or any(r in polled for r in rep.planned_reads())
         )
         self.following = [rep for rep in self.reports.values() if rep.follow]
         self.affected = lru_cache(maxsize=4096)(self._affected)
 
     def chunks(self, max_paths: int, excluded: frozenset[Read] = frozenset()) -> list[list[Read]]:
-        """The streamed reads in Subscribe requests of at most *max_paths*, a heartbeat in each."""
+        """The streamed reads in Subscribe requests of at most *max_paths*, a heartbeat in each.
+
+        A full BGP RIB path is large and slow to sync; it gets its own RPC so
+        opening another report does not replace the subscription carrying it.
+        """
         streamed = [r for r in self.streamed if r not in excluded]
+        heavy = [r for r in streamed if "/bgp-rib/afi-safi" in r.path]
+        light = [r for r in streamed if r not in heavy]
         size = max(1, max_paths - 1)
-        return [[*streamed[i : i + size], HEARTBEAT] for i in range(0, len(streamed), size)] or [[HEARTBEAT]]
+        chunks: list[list[Read]] = [
+            [*light[i : i + size], HEARTBEAT] for i in range(0, len(light), size)
+        ]
+        for read in heavy:
+            chunks.append([read, HEARTBEAT])
+        return chunks or [[HEARTBEAT]]
 
     def _affected(self, prefix: Path) -> frozenset[str]:
         return frozenset(
@@ -142,6 +159,15 @@ def _covers(outer: Read, inner: Read) -> bool:
     """Whether streaming *outer* delivers all of *inner*."""
     a, b = gpath.parse(outer.path), gpath.parse(inner.path)
     return len(a) <= len(b) and gpath.matches(a, b)
+
+
+def _attr_set_cached(tree: Tree, read: Read) -> bool:
+    """Whether *tree* already holds a BGP attribute set *read* asks for.
+
+    An index names one set for the life of the path: changed attributes move
+    the route to a new index, so a found set does not need periodic re-Get.
+    """
+    return "attr-set[index=" in read.path and isinstance(tree.get(read.path), dict)
 
 
 def _first_error(exc: BaseException) -> BaseException:
@@ -389,6 +415,8 @@ class NodeStream:
         for _ in range(MAX_FOLLOW):
             wanted = self._wanted(tree)
             todo = wanted if refresh else wanted - self._followed
+            if refresh:
+                todo = {r for r in todo if not _attr_set_cached(tree, r)}
             refresh = False
             if not todo:
                 break
@@ -449,6 +477,8 @@ class Engine:
         #: ``{(node, report): {key: record}}``: the last run of every report.
         self.records: dict[tuple[str, str], dict[str, Record]] = {}
         self._listeners: set[Listener] = set()
+        #: Per-node rendered table rows for :func:`fcli.render.table_rows`.
+        self.table_cache: dict[tuple[str, str], tuple[str, list[list[str]]]] = {}
         self.started = time.time()
 
     # -------------------------------------------------------------- listen
@@ -510,7 +540,7 @@ class Engine:
             # Let a burst of updates land before running anything.
             await asyncio.sleep(self.settle)
             self._wake.clear()
-            changes, records = self.evaluate()
+            changes, records = await asyncio.to_thread(self.evaluate)
             if self.checks and not self._ready():
                 # Half a fabric read is every link one-sided: wait for the rest.
                 self._checks_due = True

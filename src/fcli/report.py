@@ -122,6 +122,20 @@ class Report:
     detail_columns: tuple[Column, ...] = ()
     #: Not a command of its own: reached through another, as a ``bgp-rib`` family is.
     hidden: bool = False
+    #: gNMI paths depend on parameters (BGP RIB by route key, or the whole table).
+    reads_for: Callable[[Mapping[str, Any]], Iterable[Read]] | None = None
+
+    def param_values(self, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        values = {p.name: p.default for p in self.params}
+        if params:
+            values.update({k: v for k, v in params.items() if v is not None})
+        return values
+
+    def planned_reads(self, params: Mapping[str, Any] | None = None) -> tuple[Read, ...]:
+        values = self.param_values(params)
+        if self.reads_for is not None:
+            return tuple(self.reads_for(values))
+        return self.reads
 
     def run(self, node: NodeState, **params: Any) -> list[Record]:
         values = {p.name: p.default for p in self.params}
@@ -155,6 +169,7 @@ def report(
     params: Iterable[Param] = (),
     detail_columns: Iterable[Column] = (),
     hidden: bool = False,
+    reads_for: Callable[[Mapping[str, Any]], Iterable[Read]] | None = None,
 ) -> Callable[[Callable[..., Iterable[R]]], Callable[..., Iterable[R]]]:
     """Register the decorated function as the report *name*."""
 
@@ -173,6 +188,7 @@ def report(
             params=tuple(params),
             detail_columns=tuple(detail_columns),
             hidden=hidden,
+            reads_for=reads_for,
         )
         return build
 

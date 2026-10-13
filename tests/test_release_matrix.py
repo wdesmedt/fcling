@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from fcli.render import cells
+from fcli.render import cells, text
 from fcli.reports import REGISTRY
 
 from .replay import RELEASES, node_state, recorded, recordings
@@ -109,7 +109,15 @@ def test_report_matches_recording(path: Path, name: str) -> None:
     columns = {re.sub(r"^\d+_", "", " ".join(c.split())) for c in rec["columns"]} or {
         " ".join(c.title.split()) for c in report.columns
     }
-    got = sorted((_normal(cells(report, r), columns) for r in records), key=_canonical)
+    def display(value: Any) -> Any:
+        if isinstance(value, dict) and value.get("kind") == "bgp-rx-act-tx":
+            return text(value)
+        return value
+
+    got = sorted(
+        (_normal({k: display(v) for k, v in cells(report, r).items()}, columns) for r in records),
+        key=_canonical,
+    )
     rows = rec["rows"]
     if name in ENTRY_COLUMNS:
         rows = [row for row in rows if ENTRY_COLUMNS[name] & {k for k, v in row.items() if v}]

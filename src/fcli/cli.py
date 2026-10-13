@@ -303,6 +303,14 @@ for _report in REGISTRY.values():
     main.add_command(_command(_report))
 
 
+def _bgp_rib_key_options(cmd: click.Command) -> click.Command:
+    for yang in sorted({k for keys in bgp_rib.RIB_KEYS.values() for k in keys}):
+        opt = bgp_rib._param_name(yang)
+        cmd = click.option(f"--{yang}", opt, default="", help=bgp_rib._RIB_KEY_HELP.get(yang, ""))(cmd)
+    return cmd
+
+
+@_bgp_rib_key_options
 @main.command("bgp-rib")
 @click.option(
     "-r",
@@ -316,21 +324,46 @@ for _report in REGISTRY.values():
 @click.option(
     "-t",
     "--route-type",
-    type=click.Choice(sorted(bgp_rib.EVPN_ROUTES)),
+    type=click.Choice(sorted(bgp_rib.EVPN_ROUTES) + ["all"]),
     default="2",
     show_default=True,
-    help="EVPN route type",
+    help="EVPN route type (all: every type in one table)",
 )
+@click.option("--all", "list_all", is_flag=True, help="every route on every node (slow on large fabrics)")
+@click.option("--ni", default="", show_default=False, help="network-instance to read")
 @_param_option(bgp_rib.PATHS)
 @_DETAIL
 @_FIELD_FILTER
 @click.pass_obj
 def bgp_rib_command(
-    settings: Settings, family: str, route_type: str, paths: str, detail: bool, field_filters: tuple[str, ...]
+    settings: Settings,
+    family: str,
+    route_type: str,
+    list_all: bool,
+    ni: str,
+    paths: str,
+    detail: bool,
+    field_filters: tuple[str, ...],
+    **keys: str,
 ) -> None:
     """BGP RIB of one address family"""
-    report = REGISTRY[bgp_rib.report_name(family, route_type)]
-    _run(settings, report, field_filters, {"paths": paths}, detail)
+    model = bgp_rib.FAMILIES[family]
+    if model == "evpn" and route_type == "all":
+        report = REGISTRY[bgp_rib.EVPN_ALL_REPORT]
+        rt = ""
+    else:
+        report = REGISTRY[bgp_rib.report_name(family, route_type)]
+        rt = route_type if model == "evpn" else ""
+    params: dict[str, Any] = {
+        "paths": paths,
+        "ni": ni,
+        "list_all": "all" if list_all else "",
+        **{k: v for k, v in keys.items() if v},
+    }
+    asked = bgp_rib.evpn_rib_requested(params) if rt == "" and model == "evpn" else bgp_rib.rib_requested(model, rt, params)
+    if not asked:
+        raise click.UsageError("give a route key, --ni, or --all")
+    _run(settings, report, field_filters, params, detail)
 
 
 # --------------------------------------------------------------------------- #
@@ -393,7 +426,11 @@ def serve(
         highlight=False,
     )
     try:
-        run(create_app(engine, fabric, api_token, host=host), host, port)
+        run(
+            create_app(engine, fabric, api_token, host=host, rpc_timeout=settings.timeout),
+            host,
+            port,
+        )
     finally:
         store.close()
 
