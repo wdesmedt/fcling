@@ -23,9 +23,9 @@ import ssl
 import time
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
 from enum import StrEnum
 from pathlib import Path as FilePath
+from typing import Any
 
 import grpc
 from cryptography import x509

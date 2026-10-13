@@ -168,7 +168,8 @@ async def _report_collect_stream(
 
     async def work() -> None:
         try:
-            from .service import _bgp_rib_pending, _empty_report, _params as svc_params
+            from .service import _bgp_rib_pending, _empty_report
+            from .service import _params as svc_params
 
             params_ok = svc_params(spec, dict(params))
             if _bgp_rib_pending(spec, params_ok):

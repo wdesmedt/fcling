@@ -22,16 +22,14 @@ import time
 from collections.abc import Sequence
 from typing import Any, Protocol
 
-from . import views
+from . import render, views
 from .checks import Finding, required, run_checks
-from . import render
 from .collect import collect
 from .delta import record_key
 from .incidents import correlate
 from .inventory import Inventory, InventoryError
 from .remote import Remote, RemoteError
-from .reports import REGISTRY
-from .reports import bgp_rib
+from .reports import REGISTRY, bgp_rib
 from .store import BeforeHistory, Store, parse_time
 
 
@@ -88,7 +86,6 @@ def catalog(streamed: Sequence[str] = ()) -> list[dict[str, Any]]:
         parsed = bgp_rib.parse_rib_report(r.name)
         if parsed is not None:
             family, route_type = parsed
-            rt = route_type if family == "evpn" else ""
             entry["rib_keys"] = [p.name for p in bgp_rib.rib_key_params(family, route_type)]
             entry["rib_evpn"] = family == "evpn"
             entry["needs_query"] = True

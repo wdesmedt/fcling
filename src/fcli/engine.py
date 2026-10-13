@@ -109,7 +109,10 @@ class Plan:
             if r.mode is not SubscriptionMode.SAMPLE
         }
         polled = {
-            r for rep in self.reports.values() for r in rep.planned_reads() if r.mode is SubscriptionMode.SAMPLE
+            r
+            for rep in self.reports.values()
+            for r in rep.planned_reads()
+            if r.mode is SubscriptionMode.SAMPLE
         }
         #: A read another one delivers in full is left out of the request.
         self.streamed = sorted(
@@ -122,7 +125,9 @@ class Plan:
         ]
         #: Reports to re-run after a poll: they read polled paths or follow reads.
         self.after_poll = frozenset(
-            name for name, rep in self.reports.items() if rep.follow or any(r in polled for r in rep.planned_reads())
+            name
+            for name, rep in self.reports.items()
+            if rep.follow or any(r in polled for r in rep.planned_reads())
         )
         self.following = [rep for rep in self.reports.values() if rep.follow]
         self.affected = lru_cache(maxsize=4096)(self._affected)
@@ -137,9 +142,7 @@ class Plan:
         heavy = [r for r in streamed if "/bgp-rib/afi-safi" in r.path]
         light = [r for r in streamed if r not in heavy]
         size = max(1, max_paths - 1)
-        chunks: list[list[Read]] = [
-            [*light[i : i + size], HEARTBEAT] for i in range(0, len(light), size)
-        ]
+        chunks: list[list[Read]] = [[*light[i : i + size], HEARTBEAT] for i in range(0, len(light), size)]
         for read in heavy:
             chunks.append([read, HEARTBEAT])
         return chunks or [[HEARTBEAT]]

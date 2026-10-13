@@ -217,7 +217,7 @@ async def _run_node_batched(
             result.error = str(exc)
             return result
     loop = asyncio.get_running_loop()
-    q: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+    q: asyncio.Queue[tuple[str, Any, Any]] = asyncio.Queue()
     records_acc: dict[str, list[Record]] = defaultdict(list)
 
     def producer() -> None:
@@ -235,14 +235,13 @@ async def _run_node_batched(
             loop.call_soon_threadsafe(q.put_nowait, ("done", None, None))
         except Exception as exc:
             logger.exception("%s: batched report failed", state.name)
-            loop.call_soon_threadsafe(q.put_nowait, ("error", exc, None))
+            loop.call_soon_threadsafe(q.put_nowait, ("error", None, exc))
 
     threading.Thread(target=producer, daemon=True).start()
     while True:
         kind, report_name, payload = await q.get()
         if kind == "error":
-            exc = payload
-            result.error = f"report failed: {type(exc).__name__}: {exc}"
+            result.error = f"report failed: {type(payload).__name__}: {payload}"
             break
         if kind == "done":
             break

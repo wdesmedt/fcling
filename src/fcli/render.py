@@ -183,8 +183,7 @@ def table_titles(report: Report) -> list[str]:
 def rows_for_records(report: Report, records: Iterable[Record]) -> list[list[Any]]:
     """Table rows for *records* without the per-node render cache."""
     return [
-        [record.node, *(table_cell(value) for value in cells(report, record).values())]
-        for record in records
+        [record.node, *(table_cell(value) for value in cells(report, record).values())] for record in records
     ]
 
 

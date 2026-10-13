@@ -109,6 +109,7 @@ def test_report_matches_recording(path: Path, name: str) -> None:
     columns = {re.sub(r"^\d+_", "", " ".join(c.split())) for c in rec["columns"]} or {
         " ".join(c.title.split()) for c in report.columns
     }
+
     def display(value: Any) -> Any:
         if isinstance(value, dict) and value.get("kind") == "bgp-rx-act-tx":
             return text(value)

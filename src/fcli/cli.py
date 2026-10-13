@@ -360,7 +360,10 @@ def bgp_rib_command(
         "list_all": "all" if list_all else "",
         **{k: v for k, v in keys.items() if v},
     }
-    asked = bgp_rib.evpn_rib_requested(params) if rt == "" and model == "evpn" else bgp_rib.rib_requested(model, rt, params)
+    if rt == "" and model == "evpn":
+        asked = bgp_rib.evpn_rib_requested(params)
+    else:
+        asked = bgp_rib.rib_requested(model, rt, params)
     if not asked:
         raise click.UsageError("give a route key, --ni, or --all")
     _run(settings, report, field_filters, params, detail)
