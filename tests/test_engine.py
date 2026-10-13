@@ -188,3 +188,36 @@ async def test_findings_are_raised_and_cleared(target: FakeTarget, tmp_path: Pat
         with pytest.raises(asyncio.CancelledError):
             await task
         store.close()
+
+
+async def test_a_lost_node_stays_lost_while_it_is_tried_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each reconnect must not clear node_unreachable, only to raise it again when it fails."""
+    import socket
+
+    import fcli.engine
+
+    monkeypatch.setattr(fcli.engine, "BACKOFF", (0.05, 0.2))
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]  # nothing listens here once closed
+    node = Node("spine1", "127.0.0.1", port, USERNAME, PASSWORD, Tls(insecure=True))
+    store = AsyncStore(tmp_path / "h.db")
+    eng = Engine([node], [REGISTRY["bgp-peers"]], store, settle=0.01)
+    events: list[dict[str, Any]] = []
+    eng.listen(events.append)
+    task = asyncio.create_task(eng.run())
+    try:
+        await _until(lambda: [f.check for f in eng.current("checks")] == ["node_unreachable"])
+        await asyncio.sleep(1.5)  # many attempts at 0.05-0.2s apart
+        states = [e["status"] for e in events if e["type"] == "node"]
+        assert states and states[-1] == "down"
+        assert "connecting" not in states[states.index("down") :]
+        assert [op for op, report, _ in _changes(events) if report == "checks"] == ["add"]
+        assert eng.fabric().unreachable == {"spine1": eng.streams["spine1"].lost}
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        store.close()

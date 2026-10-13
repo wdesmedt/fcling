@@ -243,7 +243,9 @@ def check_lldp_one_sided(fabric: Fabric) -> Iterator[Finding]:
     seen = {(x.node, x.port, x.peer, x.peer_port) for x in adjacencies(fabric)}
     answered = fabric.answered("lldp")
     for node, port, peer, peer_port in sorted(seen):
-        if (peer, peer_port, node, port) in seen or peer not in answered:
+        # Both ends must have been read: a node that cannot be reached is seen by its
+        # neighbours as gone, while its own last word still has them.
+        if (peer, peer_port, node, port) in seen or peer not in answered or node not in answered:
             continue
         yield _f(
             "lldp_one_sided", WARNING, node, port, f"sees {peer} {peer_port}, which does not see it back"

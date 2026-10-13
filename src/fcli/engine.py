@@ -177,6 +177,9 @@ class NodeStream:
         self.status = Status.CONNECTING
         self.error = ""
         self.since = time.time()
+        #: Why the node was lost, until it is live again: retrying, or resyncing, a lost
+        #: node is still lost - else every attempt would clear and raise it again.
+        self.lost = ""
         #: When the node last sent anything.
         self.heard = 0.0
         self.models: dict[str, str] = {}
@@ -195,7 +198,15 @@ class NodeStream:
 
     # --------------------------------------------------------------- status
 
+    @property
+    def unreachable(self) -> bool:
+        return self.status is not Status.LIVE and bool(self.lost)
+
     def _set(self, status: Status, error: str = "") -> None:
+        if status is Status.DOWN:
+            self.lost = error
+        elif status is Status.LIVE:
+            self.lost = ""
         if status != self.status or error != self.error:
             self.status, self.error, self.since = status, error, time.time()
             self._on_status(self)
@@ -246,7 +257,9 @@ class NodeStream:
             if not retry:
                 # Rediscovered on each connect: an upgrade can add what was missing.
                 self.excluded.clear()
-                self._set(Status.CONNECTING, self.error)
+                if not self.lost:
+                    # A lost node stays "down", with why, while it is tried again.
+                    self._set(Status.CONNECTING, self.error)
             retry = False
             try:
                 async with GnmiClient(self.node.target()) as client:
@@ -523,7 +536,7 @@ class Engine:
         """Whether every node has been read once, or found unreachable - or long enough has passed."""
         if time.time() - self.started > STARTUP_GRACE:
             return True
-        return all(s.evaluated or s.status is Status.DOWN for s in self.streams.values())
+        return all(s.evaluated or s.unreachable for s in self.streams.values())
 
     async def _checks_tick(self) -> None:
         """Re-check now and then with nothing changed: a flap ages out of its window."""
@@ -555,7 +568,7 @@ class Engine:
                 records.setdefault(name, []).extend(rows.values())
         for name in self.plan.reports:
             records.setdefault(name, [])
-        unreachable = {s.node.name: s.error for s in self.streams.values() if s.status is Status.DOWN}
+        unreachable = {s.node.name: s.lost for s in self.streams.values() if s.unreachable}
         return Fabric.of(self.nodes, records, unreachable, list(self.recent))
 
     def evaluate_checks(

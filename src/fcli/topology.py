@@ -110,7 +110,13 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
         done.add(ends)
         (x, xp), (y, yp) = sorted((a, b))
         link = pairs.setdefault((x, y), {"a": x, "b": y, "cables": []})
-        state = "lost" if lost else _worst(ports.get((x, xp), ""), ports.get((y, yp), ""))
+        if lost:
+            state = "lost"
+        elif x in fabric.unreachable or y in fabric.unreachable:
+            # What a lost node last said of its ports is no answer: the cable's state is not known.
+            state = "unknown"
+        else:
+            state = _worst(ports.get((x, xp), ""), ports.get((y, yp), ""))
         link["cables"].append({"a_port": xp, "b_port": yp, "state": state})
 
     for (node, port), far in index.cables.items():
@@ -237,7 +243,7 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
     }
 
 
-_ORDER = {"": 0, "up": 1, "mixed": 2, "down": 3, "lost": 4}
+_ORDER = {"": 0, "up": 1, "unknown": 2, "mixed": 3, "down": 4, "lost": 5}
 
 
 def _worst(*states: str) -> str:
