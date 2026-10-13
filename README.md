@@ -1,8 +1,18 @@
 # fcli
 
+[![ci](https://github.com/wdesmedt/fcling/actions/workflows/ci.yml/badge.svg)](https://github.com/wdesmedt/fcling/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/fcling)](https://pypi.org/project/fcling/)
+
 What an SR Linux fabric looks like, what is wrong with it, and what changed, straight from gNMI.
 
 This is a ground-up rewrite of [fcli](https://github.com/srl-labs/fcli). It runs on asyncio throughout, uses no Nornir and makes no blocking gNMI calls.
+
+```bash
+uv tool install 'fcling[server,mcp,ai]'                    # the `fcli` command, from PyPI
+docker run --rm --network host -v "$PWD:/work" ghcr.io/wdesmedt/fcling -t lab.clab.yml bgp-peers
+```
+
+Or from a checkout:
 
 ```bash
 uv sync

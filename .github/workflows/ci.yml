@@ -1,0 +1,47 @@
+name: ci
+on:
+  # The badge reports the latest run on the default branch, so main has to run
+  # on push as well. Scoped to main: an unscoped push trigger would run a second
+  # time for every pull request opened from a branch in this repository.
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  tests:
+    name: tests (python ${{ matrix.python-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Quoted: unquoted 3.10 would be read as the number 3.1
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # hatch-vcs reads the version from the tags.
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+      - name: Lint
+        run: make lint
+      - name: Run tests
+        run: make test
+
+  image:
+    name: container image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          build-args: VERSION=0.0.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

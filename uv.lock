@@ -317,7 +317,7 @@ wheels = [
 ]
 
 [[package]]
-name = "fcli"
+name = "fcling"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -344,7 +344,7 @@ server = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "fcli", extra = ["ai", "mcp", "server"] },
+    { name = "fcling", extra = ["ai", "mcp", "server"] },
     { name = "grpcio-tools" },
     { name = "httpx2" },
     { name = "mypy" },
@@ -373,7 +373,7 @@ provides-extras = ["ai", "mcp", "server"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "fcli", extras = ["server", "mcp", "ai"] },
+    { name = "fcling", extras = ["server", "mcp", "ai"] },
     { name = "grpcio-tools", specifier = ">=1.84" },
     { name = "httpx2", specifier = ">=2.13.1" },
     { name = "mypy", specifier = ">=1.11" },

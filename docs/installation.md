@@ -2,7 +2,13 @@
 
 ## Install
 
-fcli needs Python 3.11 or later. From a checkout, with [uv](https://docs.astral.sh/uv/):
+fcli needs Python 3.11 or later. It is published on PyPI as `fcling` and installs a command named `fcli`:
+
+```bash
+uv tool install 'fcling[server,mcp,ai]'    # or: pipx install 'fcling[server,mcp,ai]'
+```
+
+From a checkout, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv tool install '.[server,mcp,ai]'         # an `fcli` command on your PATH
@@ -10,6 +16,18 @@ uv sync --all-extras && uv run fcli ...    # or run it from the checkout
 ```
 
 The original, Nornir-based fcli installs a command named `fcli` too. Installing both as tools makes them clash: `uv tool uninstall nornir-srl` first, or use `uv run fcli` from the checkout.
+
+### Container image
+
+Each release is also an image with every extra, `ghcr.io/wdesmedt/fcling`. Its entrypoint is `fcli`, it works in `/work` and keeps its history in the `/state` volume:
+
+```bash
+docker run --rm --network host -v "$PWD:/work" ghcr.io/wdesmedt/fcling -t lab.clab.yml sys-info
+docker run -d --name fcli --network host -v "$PWD:/work" -v fcli-state:/state \
+    ghcr.io/wdesmedt/fcling -t lab.clab.yml serve
+```
+
+`--network host` lets it reach containerlab nodes by their container names and keeps `fcli serve` on localhost. Without it, publish the port and listen on every address: `-p 8765:8765 ... serve --host 0.0.0.0`. Beyond localhost every call needs a token; fcli makes one up and prints it, or takes yours with `--api-token`.
 
 The core package is the one-shot CLI. The extras add the rest:
 

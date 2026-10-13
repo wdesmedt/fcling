@@ -112,7 +112,6 @@ tests/.backup
 inventory
 intent
 *.pem
-.dockerignore
 **/*.bak
 **/*.sav
 .gemini

@@ -1,5 +1,5 @@
 [project]
-name = "fcli"
+name = "fcling"
 dynamic = ["version"]
 description = "Fabric CLI: what an SR Linux fabric looks like, what is wrong with it, and what changed"
 readme = "README.md"
@@ -17,6 +17,11 @@ dependencies = [
     "pyyaml>=6.0",
     "cryptography>=42",
 ]
+
+[project.urls]
+Homepage = "https://github.com/wdesmedt/fcling"
+Documentation = "https://github.com/wdesmedt/fcling/tree/main/docs"
+Issues = "https://github.com/wdesmedt/fcling/issues"
 
 [project.scripts]
 fcli = "fcli.cli:main"
@@ -36,7 +41,7 @@ ai = [
 
 [dependency-groups]
 dev = [
-    "fcli[server,mcp,ai]",
+    "fcling[server,mcp,ai]",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "grpcio-tools>=1.84",
