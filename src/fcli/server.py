@@ -101,19 +101,34 @@ class _Auth:
 
 
 #: Query parameters about the answer, not arguments of the report or lens.
-_CONTROL = ("inv", "node", "at", "token", "table")
+_CONTROL = ("inv", "node", "at", "token", "table", "progress")
 
 
-def _table(spec: Any, answer: dict[str, Any], request: Request) -> dict[str, Any]:
+def _table_sync(
+    spec: Any, answer: dict[str, Any], request: Request, engine: Engine | None = None
+) -> dict[str, Any]:
     """With ``?table=1``, the answer also as the CLI's table: column titles, and each row's cells as text."""
     if request.query_params.get("table") not in ("1", "true", "yes"):
         return answer
-    records = render.sorted_records([spec.record.model_validate(r) for r in answer["records"]], spec)
-    return {
-        **answer,
-        "columns": ["Node", *(c.title for c in spec.table())],
-        "rows": [[r.node, *(render.text(v) for v in render.cells(spec, r).values())] for r in records],
-    }
+    records = [spec.record.model_validate(r) for r in answer["records"]]
+    params = {k: v for k, v in request.query_params.items() if k not in _CONTROL and k != "table"}
+    cache_key = f"{spec.name}:{json.dumps(params, sort_keys=True)}"
+    cache = engine.table_cache if engine is not None and answer.get("source") == "live" else None
+    columns, rows = render.table_rows(spec, records, cache=cache, cache_key=cache_key)
+    rows, note = render.truncate_rows(rows)
+    out = {**answer, "columns": columns, "rows": rows}
+    if note:
+        out["truncated"] = True
+        out["message"] = note
+    return out
+
+
+async def _table(
+    spec: Any, answer: dict[str, Any], request: Request, engine: Engine | None = None
+) -> dict[str, Any]:
+    if request.query_params.get("table") not in ("1", "true", "yes"):
+        return answer
+    return await asyncio.to_thread(_table_sync, spec, answer, request, engine)
 
 
 def _public(path: str) -> bool:
@@ -123,15 +138,77 @@ def _public(path: str) -> bool:
 
 def _sse(event: dict[str, Any]) -> str:
     lines = []
-    if event.get("type") == "change" and event.get("seq"):
+    kind = event.get("type", "message")
+    if kind == "change" and event.get("seq"):
         lines.append(f"id: {event['seq']}")
-    lines.append(f"event: {event['type']}")
+    lines.append(f"event: {kind}")
     lines.append(f"data: {json.dumps(event, separators=(',', ':'), default=str)}")
     return "\n".join(lines) + "\n\n"
 
 
 def _events(stream: AsyncIterator[str]) -> StreamingResponse:
     return StreamingResponse(stream, media_type="text/event-stream", headers={"cache-control": "no-cache"})
+
+
+async def _report_collect_stream(
+    service: EngineService, spec: Any, request: Request, engine: Engine
+) -> AsyncIterator[str]:
+    """Collect a report node by node, reporting progress, then the table answer."""
+    params = {k: v for k, v in request.query_params.items() if k not in _CONTROL}
+    query_list = lambda request, name: request.query_params.getlist(name)  # noqa: E731
+    names = select_nodes(
+        service.fabric,
+        query_list(request, "inv"),
+        query_list(request, "node"),
+    )
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    def on_node(node: str, done: int, total: int) -> None:
+        queue.put_nowait({"type": "progress", "node": node, "done": done, "total": total})
+
+    async def work() -> None:
+        try:
+            from .service import _bgp_rib_pending, _empty_report, _params as svc_params
+
+            params_ok = svc_params(spec, dict(params))
+            if _bgp_rib_pending(spec, params_ok):
+                answer = _empty_report(
+                    spec,
+                    "Narrow the RIB with route keys or network-instance, or choose List all routes.",
+                )
+            else:
+
+                async def emit(event: dict[str, Any]) -> None:
+                    if event.get("type") == "partial":
+                        ans = event["answer"]
+                        await queue.put({"type": "partial", "answer": ans})
+                    else:
+                        await queue.put(event)
+
+                answer = await service._collect_report_streaming(
+                    spec, params_ok, names, emit, on_node=on_node
+                )
+            if not answer.get("columns"):
+                answer = await _table(spec, {**answer, "records": answer.get("records", [])}, request, engine)
+            await queue.put({"type": "result", "answer": answer})
+        except ServiceError as exc:
+            await queue.put({"type": "failed", "error": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            await queue.put({"type": "failed", "error": str(exc)})
+        finally:
+            await queue.put(None)
+
+    worker = asyncio.create_task(work())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield _sse(event)
+    finally:
+        worker.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker
 
 
 def create_app(
@@ -141,9 +218,10 @@ def create_app(
     run_engine: bool = True,
     host: str = "127.0.0.1",
     agent_client: Any = None,
+    rpc_timeout: float = 30.0,
 ) -> Starlette:
     """The app serving *engine*, which it runs for as long as it is up when *run_engine*."""
-    service = EngineService(engine, fabric)
+    service = EngineService(engine, fabric, rpc_timeout=rpc_timeout)
     query_list = lambda request, name: request.query_params.getlist(name)  # noqa: E731
     # The open event streams: told to end when the server stops, or it would wait on them for ever.
     streams: set[asyncio.Queue[dict[str, Any] | None]] = set()
@@ -174,6 +252,12 @@ def create_app(
 
         name = request.path_params["name"]
         params = {k: v for k, v in request.query_params.items() if k not in _CONTROL}
+        spec = REGISTRY.get(name)
+        if spec is None:
+            raise _Error(404, f"no report {name!r}")
+        if request.query_params.get("progress") in ("1", "true") and not request.query_params.get("at"):
+            return _events(_report_collect_stream(service, spec, request, engine))
+
         try:
             answer = await service.records(
                 name,
@@ -184,7 +268,7 @@ def create_app(
             )
         except ServiceError as exc:
             raise _Error(404 if str(exc).startswith("no report") else 400, str(exc)) from exc
-        return _table(REGISTRY[name], answer, request)
+        return await _table(spec, answer, request, engine)
 
     def _nodes(request: Request) -> set[str] | None:
         """The nodes an ``inv=`` / ``node=`` query narrows to; ``None`` for all."""
@@ -323,7 +407,7 @@ def create_app(
             answer = await service.lens(name, args, request.query_params.get("at"))
         except ServiceError as exc:
             raise _Error(404 if str(exc).startswith("no lens") else 400, str(exc)) from exc
-        return _table(LENSES[name], answer, request)
+        return await _table(LENSES[name], answer, request)
 
     async def topology(request: Request) -> Any:
         return await service.topology(request.query_params.get("at"))

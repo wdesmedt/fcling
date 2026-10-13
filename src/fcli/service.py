@@ -24,12 +24,14 @@ from typing import Any, Protocol
 
 from . import views
 from .checks import Finding, required, run_checks
+from . import render
 from .collect import collect
 from .delta import record_key
 from .incidents import correlate
 from .inventory import Inventory, InventoryError
 from .remote import Remote, RemoteError
 from .reports import REGISTRY
+from .reports import bgp_rib
 from .store import BeforeHistory, Store, parse_time
 
 
@@ -50,7 +52,7 @@ def _params(report: Any, params: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise ServiceError(f"{report.name} takes no parameter {', '.join(sorted(unknown))}")
     for name, value in params.items():
-        if known[name].choices and value not in known[name].choices:
+        if known[name].choices and value and value not in known[name].choices:
             raise ServiceError(f"{name}: {value!r} is not one of {', '.join(known[name].choices)}")
     return params
 
@@ -66,8 +68,9 @@ def _instant(text: str | None) -> float | None:
 
 def catalog(streamed: Sequence[str] = ()) -> list[dict[str, Any]]:
     """Every report, as a client needs to know it to ask for one."""
-    return [
-        {
+    out: list[dict[str, Any]] = []
+    for r in REGISTRY.values():
+        entry: dict[str, Any] = {
             "name": r.name,
             "help": r.help,
             "streamed": r.name in streamed,
@@ -82,8 +85,29 @@ def catalog(streamed: Sequence[str] = ()) -> list[dict[str, Any]]:
             "volatile": list(r.record.volatile),
             "schema": r.record.model_json_schema(),
         }
-        for r in REGISTRY.values()
-    ]
+        parsed = bgp_rib.parse_rib_report(r.name)
+        if parsed is not None:
+            family, route_type = parsed
+            rt = route_type if family == "evpn" else ""
+            entry["rib_keys"] = [p.name for p in bgp_rib.rib_key_params(family, route_type)]
+            entry["rib_evpn"] = family == "evpn"
+            entry["needs_query"] = True
+        out.append(entry)
+    return out
+
+
+def _bgp_rib_pending(spec: Any, params: dict[str, Any]) -> bool:
+    parsed = bgp_rib.parse_rib_report(spec.name)
+    if parsed is None:
+        return False
+    family, route_type = parsed
+    if family == "evpn" and not route_type:
+        return not bgp_rib.evpn_rib_requested(params)
+    return not bgp_rib.rib_requested(family, route_type, params)
+
+
+def _empty_report(spec: Any, message: str) -> dict[str, Any]:
+    return {"report": spec.name, "source": "pending", "records": [], "errors": {}, "message": message}
 
 
 class Service(Protocol):
@@ -182,10 +206,29 @@ def select_nodes(fabric: Inventory, filters: Sequence[str], nodes: Sequence[str]
 # --------------------------------------------------------------------------- #
 
 
+def _pack_collect(results: Sequence[Any], report_name: str) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    rows: list[dict[str, Any]] = []
+    errors: dict[str, str] = {}
+    for res in results:
+        if res.error:
+            errors[res.node.name] = res.error
+        rows.extend(r.model_dump(mode="json") for r in res.records.get(report_name, []))
+    return rows, errors
+
+
+def _collect_rpc_timeout(spec: Any, base: float) -> float:
+    """BGP RIB walks can exceed the default gNMI deadline on a busy leaf."""
+    if bgp_rib.parse_rib_report(spec.name) is not None:
+        return max(base, 180.0)
+    return base
+
+
 class EngineService:
-    def __init__(self, engine: Any, fabric: Inventory) -> None:
+    def __init__(self, engine: Any, fabric: Inventory, rpc_timeout: float = 30.0) -> None:
         self.engine = engine
         self.fabric = fabric
+        self.rpc_timeout = rpc_timeout
+        self._collect_slots = asyncio.Semaphore(2)
 
     def _store(self) -> Any:
         if self.engine.store is None:
@@ -227,14 +270,21 @@ class EngineService:
     ) -> dict[str, Any]:
         spec = _report(report)
         params = _params(spec, dict(params or {}))
+        if _bgp_rib_pending(spec, params):
+            return _empty_report(
+                spec,
+                "Narrow the RIB with route keys or network-instance, or choose List all routes.",
+            )
         names = select_nodes(self.fabric, filters, nodes)
         when = _instant(at)
         if when is not None:
             state = await self._then(Store.state_at, when, spec.name, names)
             rows = [r for node in names for r in state.get(node, {}).values()]
             return {"report": spec.name, "source": "history", "at": when, "records": rows, "errors": {}}
-        if spec.name in self.engine.plan.reports and all(
-            params.get(p.name, p.default) == p.default for p in spec.params
+        if (
+            spec.name in self.engine.plan.reports
+            and spec.planned_reads(params)
+            and all(params.get(p.name, p.default) == p.default for p in spec.params)
         ):
             rows = [r.model_dump(mode="json") for r in self.engine.current(spec.name, names)]
             errors = {
@@ -243,11 +293,114 @@ class EngineService:
                 if s["name"] in names and s["status"] != "live"
             }
             return {"report": spec.name, "source": "live", "records": rows, "errors": errors}
-        selected = [n for n in self.fabric.nodes if n.name in names]
-        results = await collect(selected, [spec], params=params)
-        rows = [r.model_dump(mode="json") for res in results for r in res.records.get(spec.name, [])]
-        errors = {res.node.name: res.error for res in results if res.error}
+        return await self._collect_report(spec, params, names)
+
+    async def _collect_report(
+        self,
+        spec: Any,
+        params: dict[str, Any],
+        names: list[str],
+        on_node: Any = None,
+    ) -> dict[str, Any]:
+        async with self._collect_slots:
+            selected = [n for n in self.fabric.nodes if n.name in names]
+            results = await collect(
+                selected,
+                [spec],
+                rpc_timeout=_collect_rpc_timeout(spec, self.rpc_timeout),
+                params=params,
+                on_node=on_node,
+            )
+            rows, errors = await asyncio.to_thread(_pack_collect, results, spec.name)
         return {"report": spec.name, "source": "collected", "records": rows, "errors": errors}
+
+    async def _collect_report_streaming(
+        self,
+        spec: Any,
+        params: dict[str, Any],
+        names: list[str],
+        emit: Any,
+        on_node: Any = None,
+    ) -> dict[str, Any]:
+        """Collect with batched partial table events for the UI."""
+        async with self._collect_slots:
+            selected = [n for n in self.fabric.nodes if n.name in names]
+            titles = render.table_titles(spec)
+            rows: list[list[Any]] = []
+            errors: dict[str, str] = {}
+            truncated = False
+            lock = asyncio.Lock()
+            #: Rows already sent: each partial carries only the rows after them
+            #: and says ``append``. Resending the table so far, 61k EVPN routes
+            #: from one peer came to a gigabyte of events.
+            sent = 0
+            first = True
+
+            async def push_partial() -> None:
+                nonlocal sent, first
+                fresh = rows[sent:]
+                await emit(
+                    {
+                        "type": "partial",
+                        "answer": {
+                            "report": spec.name,
+                            "source": "collected",
+                            "loading": True,
+                            "columns": titles,
+                            "rows": fresh,
+                            "append": not first,
+                            "errors": dict(errors),
+                            "truncated": truncated,
+                            "message": None,
+                        },
+                    }
+                )
+                sent, first = len(rows), False
+
+            await push_partial()
+
+            async def on_batch(_result: Any, batch: Sequence[Any]) -> None:
+                nonlocal truncated
+                if not batch:
+                    return
+                new_rows = await asyncio.to_thread(render.rows_for_records, spec, batch)
+                async with lock:
+                    rows.extend(new_rows)
+                    if len(rows) > render.TABLE_MAX_ROWS:
+                        truncated = True
+                        rows[:] = rows[: render.TABLE_MAX_ROWS]
+                    if len(rows) > sent:
+                        await push_partial()
+
+            def node_progress(node: str, done: int, total: int) -> None:
+                if on_node is not None:
+                    on_node(node, done, total)
+
+            results = await collect(
+                selected,
+                [spec],
+                rpc_timeout=_collect_rpc_timeout(spec, self.rpc_timeout),
+                params=params,
+                on_node=node_progress,
+                on_batch=on_batch,
+            )
+            _, pack_errors = await asyncio.to_thread(_pack_collect, results, spec.name)
+            errors.update(pack_errors)
+            if not rows:
+                records = [r for res in results for r in res.records.get(spec.name, [])]
+                if records:
+                    _, rows = await asyncio.to_thread(render.table_rows, spec, records)
+            shown, note = render.truncate_rows(rows)
+            return {
+                "report": spec.name,
+                "source": "collected",
+                "loading": False,
+                "columns": titles,
+                "rows": shown,
+                "errors": errors,
+                "truncated": truncated or note is not None,
+                "message": note,
+            }
 
     async def _findings(self, at: str | None) -> tuple[list[Finding], Any, dict[tuple[str, str], float]]:
         when = _instant(at)
@@ -456,11 +609,15 @@ class LocalService:
             raise ServiceError(_NO_HISTORY)
         spec = _report(report)
         params = _params(spec, dict(params or {}))
+        if _bgp_rib_pending(spec, params):
+            return _empty_report(
+                spec,
+                "Narrow the RIB with route keys or network-instance, or choose List all routes.",
+            )
         names = set(select_nodes(self.fabric, filters, nodes))
         selected = [n for n in self.fabric.nodes if n.name in names]
         results = await collect(selected, [spec], rpc_timeout=self.rpc_timeout, params=params)
-        rows = [r.model_dump(mode="json") for res in results for r in res.records.get(spec.name, [])]
-        errors = {res.node.name: res.error for res in results if res.error}
+        rows, errors = await asyncio.to_thread(_pack_collect, results, spec.name)
         return {"report": spec.name, "source": "collected", "records": rows, "errors": errors}
 
     async def _fabric(self, at: str | None) -> Any:
