@@ -37,7 +37,8 @@ from .lenses.common import Index
 #: What the topology reads.
 REQUIRES = ("services", "lldp", "lag", "subif", "es", "ifstats")
 
-TIERS = ("gateway", "spine", "leaf", "core", "unclassified")
+#: Top down, as drawn: the WAN core above the gateways out to it.
+TIERS = ("core", "gateway", "spine", "leaf", "unclassified")
 
 
 def _tiers(fabric: Fabric, index: Index) -> dict[str, str]:

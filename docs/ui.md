@@ -21,7 +21,7 @@ The panel on the left holds every view:
 
 ## Topology
 
-The fabric is drawn by tier: spines above leaves, gateways and core above them, and the clients below the leaves they hang off. A multihomed client sits under the middle of its leaves. Each node carries a colour bar for its health, and red and amber badges count its errors and warnings. An unreachable node has a dashed grey outline. Cables are coloured by state: amber for mixed, red for down, and dashed red for a cable the history saw that LLDP no longer reports. `×N` marks parallel cables.
+The fabric is drawn by tier: the core on top, then gateways, spines and leaves, and the clients below the leaves they hang off. A multihomed client sits under the middle of its leaves. Each node carries a colour bar for its health, and red and amber badges count its errors and warnings. An unreachable node has a dashed grey outline. Cables are coloured by state: amber for mixed, red for down, and dashed red for a cable the history saw that LLDP no longer reports. `×N` marks parallel cables.
 
 **Show** (top left) picks what the drawing is coloured by:
 

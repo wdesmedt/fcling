@@ -3,7 +3,7 @@
 import { html, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
 import { ago, bySeverity, get, natural } from "./api.js";
 
-const TIERS = ["gateway", "core", "spine", "leaf", "unclassified"];
+const TIERS = ["core", "gateway", "spine", "leaf", "unclassified"];
 const NODE = { w: 124, h: 42 };
 const CLIENT = { w: 118, h: 30 };
 const GAP = 28;
