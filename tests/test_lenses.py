@@ -366,3 +366,17 @@ def test_topology_nodes_carry_their_platform_and_system_addresses() -> None:
         "2001:db8::1",
     )
     assert (nodes["leaf2"]["type"], nodes["leaf2"]["ipv4"], nodes["leaf2"]["ipv6"]) == ("", "10.0.0.2", "")
+
+
+def test_topology_nodes_carry_the_default_instance_asn() -> None:
+    from fcli.reports.instances import NiInterface
+
+    records = lens_fabric.records()
+    records["ni"] = [
+        *records["ni"],
+        NiInterface(node="leaf1", ni="default", asn=65001),
+        NiInterface(node="leaf2", ni="ip-vrf1", asn=65099),
+    ]
+    nodes = {n["name"]: n for n in build(dataclasses.replace(fabric(), records=records))["nodes"]}
+    assert nodes["leaf1"]["asn"] == 65001
+    assert nodes["leaf2"]["asn"] is None

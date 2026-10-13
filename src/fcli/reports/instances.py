@@ -22,6 +22,7 @@ NI_READS = (
     NI_INTERFACES,
     Read("/network-instance[name=*]/vxlan-interface", DataType.ALL),
     Read("/network-instance[name=*]/protocols/bgp/router-id", DataType.ALL),
+    Read("/network-instance[name=*]/protocols/bgp/autonomous-system", DataType.ALL),
     Read("/network-instance[name=*]/protocols/bgp-vpn", DataType.ALL),
     Read("/network-instance[name=*]/protocols/bgp-evpn", DataType.ALL),
     # Route-targets a policy sets are only known from the policy.
@@ -60,6 +61,8 @@ class Instance(BaseModel):
     type: str = ""
     oper: str = ""
     router_id: str = ""
+    #: The BGP autonomous-system, where BGP is configured.
+    asn: int | None = None
     #: The vxlan-interfaces bound to it.
     overlays: tuple[str, ...] = ()
     #: The EVI of each bgp-evpn instance; a gateway has two.
@@ -164,6 +167,7 @@ def instances(tree: Tree) -> list[Instance]:
                 type=str(ni.get("type") or ""),
                 oper=str(ni.get("oper-state") or ""),
                 router_id=str(dig(ni, "protocols", "bgp", "router-id") or ""),
+                asn=as_int(dig(ni, "protocols", "bgp", "autonomous-system")),
                 overlays=tuple(
                     str(v.get("name") or "")
                     for v in as_list(ni.get("vxlan-interface"))
@@ -199,6 +203,8 @@ class NiInterface(Record):
     type: str = ""
     oper: str = ""
     router_id: str = ""
+    #: The BGP autonomous-system, where BGP is configured.
+    asn: int | None = None
     overlays: tuple[str, ...] = ()
     evis: tuple[str, ...] = ()
     import_rts: tuple[str, ...] = ()
@@ -255,6 +261,7 @@ def ni(node: NodeState) -> Iterator[NiInterface]:
             type=inst.type,
             oper=inst.oper,
             router_id=inst.router_id,
+            asn=inst.asn,
             overlays=inst.overlays,
             evis=inst.evis,
             import_rts=inst.import_rts,

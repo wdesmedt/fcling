@@ -125,6 +125,7 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
     rates = _rates(fabric)
     system = _system(fabric)
     platform = {r.node: r.type for r in fabric.get("sys-info")}
+    asn = {r.node: r.asn for r in fabric.get("ni") if r.ni == "default" and r.asn is not None}
 
     def out_bps(node: str, port: str) -> float | None:
         rate = rates.get((node, port))
@@ -275,6 +276,7 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
                 "type": platform.get(n, ""),
                 "ipv4": system.get(n, {}).get("ipv4", ""),
                 "ipv6": system.get(n, {}).get("ipv6", ""),
+                "asn": asn.get(n),
                 "unreachable": fabric.unreachable.get(n, ""),
                 "findings": _counts(by_node.get(n, [])),
                 "health": _health(by_node.get(n, [])),

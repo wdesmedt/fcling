@@ -18,7 +18,8 @@ const rowWidth = (n, w, gap) => n * w + Math.max(0, n - 1) * gap;
 
 /** Where everything goes: one block per component, a row per tier, clients under the nodes they hang off. */
 export function layout(graph) {
-  NODE.h = graph.nodes.some((n) => n.ipv6) ? 52 + LINE : 52;
+  // Room for one line under the platform; each of the AS and an IPv6 address, where any node has one, adds a line.
+  NODE.h = 52 + LINE * (graph.nodes.some((n) => n.asn != null) + graph.nodes.some((n) => n.ipv6));
   const tierOf = new Map(graph.nodes.map((n) => [n.name, n.tier]));
   const nodes = new Map();
   const clients = new Map();
@@ -351,7 +352,7 @@ export function Topology({
               <rect class="bar" width="5" height=${NODE.h} rx="2" />
               <text class="name" x="14" y="18">${n.name}</text>
               <text class="sub" x="14" y="31">${down ? "unreachable" : n.type || n.tier}</text>
-              ${[n.ipv4, n.ipv6].filter(Boolean).map(
+              ${[n.asn != null && `AS ${n.asn}`, n.ipv4, n.ipv6].filter(Boolean).map(
                 (address, i) => html`<text class="address" x="14" y=${31 + LINE * (i + 1)}>${address.length > 22 ? `${address.slice(0, 21)}…` : address}</text>`,
               )}
               ${overlay?.marks?.get(n.name) &&
@@ -362,7 +363,7 @@ export function Topology({
                 <circle r="10" /><text y="4">${errors}</text></g>`}
               ${warnings > 0 && html`<g transform=${`translate(${NODE.w - (errors ? 36 : 14)},0)`} class="badge warning">
                 <circle r="10" /><text y="4">${warnings}</text></g>`}
-              <title>${[`${n.name} (${n.tier}${n.type ? `, ${n.type}` : ""})`, n.ipv4, n.ipv6, down ? n.unreachable || s?.error || "down" : ""].filter(Boolean).join("\n")}</title>
+              <title>${[`${n.name} (${n.tier}${n.type ? `, ${n.type}` : ""})`, n.asn != null && `AS ${n.asn}`, n.ipv4, n.ipv6, down ? n.unreachable || s?.error || "down" : ""].filter(Boolean).join("\n")}</title>
             </g>`;
           })}
           ${graph.clients.map((c) => {
@@ -504,6 +505,7 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
       <h2>${n.name} <span class=${`pill ${n.unreachable ? "down" : n.health}`}>${n.unreachable ? "unreachable" : n.health}</span></h2>
       <dl class="facts">
         <dt>tier</dt><dd>${n.tier}</dd>
+        ${n.asn != null && html`<dt>AS</dt><dd class="mono">${n.asn}</dd>`}
         ${s && html`<dt>stream</dt><dd>${s.status}${s.since ? html` <span class="muted">since ${ago(s.since)}</span>` : ""}</dd>`}
         ${s?.address && html`<dt>address</dt><dd class="mono">${s.address}</dd>`}
         ${s && Object.keys(s.labels || {}).length > 0 &&
