@@ -570,3 +570,76 @@ def _fold(members: list[Incident], id_: str, title: str, cause: str | None) -> I
 
 def findings_of(incidents: Iterable[Incident]) -> list[Finding]:
     return [f for i in incidents for f in i.findings]
+
+
+# --------------------------------------------------------------------------- #
+# the far end of a change
+# --------------------------------------------------------------------------- #
+
+#: Fields that name a port, by report: the cable from it leads to another node.
+_PORT_FIELDS: Mapping[str, tuple[str, ...]] = {
+    "subif": ("name",),
+    "ifstats": ("name",),
+    "lag": ("member",),
+    "lldp": ("interface",),
+    "isis": ("interface",),
+    "ospf": ("interface",),
+    "bfd": ("interface",),
+}
+#: The field naming a session's peer, by report: with ``ni``, the session ``<ni>/<peer>``.
+_PEER_FIELD: Mapping[str, str] = {"bgp-peers": "peer", "bfd": "remote_address"}
+#: Fields holding the name another node advertises, by report.
+_NAME_FIELDS: Mapping[str, tuple[str, ...]] = {"lldp": ("system_name",), "isis": ("hostname",)}
+
+
+class FarEnds:
+    """The other nodes a change is about: the far end of its cable, the peer of its session.
+
+    A commit on one node shows up on its neighbours - a BGP session dropping
+    on the leaf whose spine was reconfigured - so a change is put down to a
+    commit at either end. Built from one fabric, usually the current one: a
+    cable is the same cable a few minutes earlier.
+    """
+
+    def __init__(self, fabric: Fabric) -> None:
+        self.fabric = fabric
+        self.where = _Where(fabric)
+        self.nodes = set(fabric.nodes)
+
+    def _far(self, node: str, port: str) -> str | None:
+        if not port or out_of_band(port):
+            return None
+        far = self.where.links.get((node, parent(port)))
+        return far[0] if far else None
+
+    def of(self, change: Mapping[str, Any]) -> set[str]:
+        node, report = str(change["node"]), str(change["report"])
+        record = change.get("after") or change.get("before") or {}
+        found: set[str | None] = set()
+        if report == "checks":
+            try:
+                finding = Finding.model_validate(record)
+            except ValueError:
+                return set()
+            found |= self._anchored(_anchor(finding, self.where, set(), set()))
+        for name in _PORT_FIELDS.get(report, ()):
+            found.add(self._far(node, str(record.get(name) or "")))
+        if report in _PEER_FIELD and record.get(_PEER_FIELD[report]):
+            subject = f"{record.get('ni', '')}/{record[_PEER_FIELD[report]]}"
+            found.add(self.where.session_peer(subject))
+            over = self.where.session_port(node, subject)
+            found.add(self._far(node, over) if over else None)
+        for name in _NAME_FIELDS.get(report, ()):
+            found.add(self.fabric.resolve(str(record.get(name) or "")))
+        return {n for n in found if n and n != node and n in self.nodes}
+
+    @staticmethod
+    def _anchored(anchor: Anchor) -> set[str | None]:
+        kind = anchor[0]
+        if kind == "link":
+            return {port[0] for port in anchor[1]}
+        if kind == "session":
+            return set(anchor[2])
+        if kind in ("underlay", "node", "platform"):
+            return set(anchor[1:])
+        return set()

@@ -32,14 +32,25 @@ Without `--server`, `history` reads the local history database directly, so it w
 
 ### Which commit caused a change
 
-Every change is checked against the configuration commits (`config-commits`) of its node. A change within two minutes after a commit is attributed to that commit:
+Every change is checked against the configuration commits (`config-commits`) seen shortly before it. A change within two minutes after a commit is put down to that commit, if the commit was made on the change's own node or on a node at the far end of it:
+
+| A change to | Its far end |
+|---|---|
+| a port (`subif`, `ifstats`, `lag` members, `lldp`, `isis`, `ospf`, `bfd`) | the node on the other end of the cable, from LLDP, or from a /31 or /127 both ends share |
+| a session (`bgp-peers`, `bfd`) | the node that owns the peer address (a loopback or an interface address), or the node across the cable for a link-local peer |
+| a neighbour by name (`lldp` system name, IS-IS hostname) | that node |
+| a finding | the nodes of what the incidents anchor it to: a cable, a session, the underlay between two nodes |
+
+So when a spine is reconfigured, the leaf's session to it dropping, the leaf's port going down and a finding about either are all put down to the spine's commit. When both ends committed, the later commit is the cause. Cables and addresses come from the fabric as the history has it now: a cable is the same cable a few minutes earlier.
 
 ```
-time                 node   report     op      key                      what                      after
-2026-10-13 14:02:31  leaf1  bgp-peers  change  ["default","10.0.0.2"]   state: established -> idle  commit 12 by admin (mtu change)
+time                 node   report     op      key                      what                        after
+2026-10-13 14:02:31  leaf1  bgp-peers  change  ["default","10.0.0.2"]   state: established -> idle  commit 12 on spine1 by admin (mtu change)
 ```
 
 Commits are matched by when the engine saw them, not by the node's clock, which need not agree with the server's. The node's clock decides one thing only. A commit that ended more than 15 minutes before the engine saw it was read from the commit log when the node was first synced, along with everything else, so it is not the cause of anything.
+
+This is timing, not proof. Something unrelated within two minutes of a commit, at either end, is put down to it too. And a change two hops away, a leaf's EVPN routes after a policy change on a DCGW, is not.
 
 ### Configuration-related, or unplanned
 

@@ -16,11 +16,11 @@ from .checks import FLAP_WINDOW, Finding, run_checks
 from .collect import collect
 from .delta import Change, diff, keyed
 from .fabric import Fabric
-from .incidents import Incident, correlate
+from .incidents import FarEnds, Incident, correlate
 from .inventory import Node
 from .report import Record
 from .reports import REGISTRY
-from .store import Store
+from .store import BeforeHistory, Store
 
 #: Seconds between the two samples a one-shot ``checks`` takes of the counters.
 CHECK_INTERVAL = 2.0
@@ -132,11 +132,16 @@ def _fresh(commit: Mapping[str, Any]) -> bool:
     return made is None or commit["ts"] - made.timestamp() <= FRESH_COMMIT
 
 
-def attribute(changes: Sequence[dict[str, Any]], commits: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    """*changes*, each with the ``cause`` that most likely made it - the last
-    configuration commit on its node shortly before it - and its ``origin``:
+def attribute(
+    changes: Sequence[dict[str, Any]], commits: Sequence[dict[str, Any]], ends: FarEnds | None = None
+) -> list[dict[str, Any]]:
+    """*changes*, each with the ``cause`` that most likely made it and its ``origin``:
     ``config`` for a commit and what one caused, ``unplanned`` for the rest.
     ``commit`` names the commit, ``{"node", "id"}``, for its configuration diff.
+
+    A change is put down to the latest commit shortly before it on its own
+    node or - with *ends* - on a node at the far end of its cable or session:
+    a spine reconfigured drops the leaf's session too.
 
     Commits are matched by when the engine saw them, not by the node's clock,
     which need not agree with the server's.
@@ -154,32 +159,62 @@ def attribute(changes: Sequence[dict[str, Any]], commits: Sequence[dict[str, Any
         if change["report"] == "config-commits":
             record = change.get("after") or change.get("before") or {}
             commit_ref = {"node": change["node"], "id": record.get("id")}
-        else:
-            for commit in reversed(by_node.get(change["node"], [])):
-                if commit["ts"] <= change["ts"] + 1.0 and change["ts"] - commit["ts"] <= ATTRIBUTION_WINDOW:
-                    a = commit["after"]
-                    cause = f"commit {a.get('id')} by {a.get('username') or '?'}"
-                    if a.get("comment"):
-                        cause += f" ({a['comment']})"
-                    commit_ref = {"node": change["node"], "id": a.get("id")}
-                    break
+        elif by_node:
+            nodes = {change["node"]}
+            if ends is not None and any(n != change["node"] for n in by_node):
+                nodes |= ends.of(change)
+            latest = (_last_commit(by_node.get(n, ()), change["ts"]) for n in nodes)
+            found = [c for c in latest if c is not None]
+            if found:
+                commit = max(found, key=lambda c: c["ts"])
+                a = commit["after"]
+                where = "" if commit["node"] == change["node"] else f" on {commit['node']}"
+                cause = f"commit {a.get('id')}{where} by {a.get('username') or '?'}"
+                if a.get("comment"):
+                    cause += f" ({a['comment']})"
+                commit_ref = {"node": commit["node"], "id": a.get("id")}
         origin = CONFIG if commit_ref else UNPLANNED
         out.append({**change, "cause": cause, "origin": origin, "commit": commit_ref})
     return out
+
+
+def _last_commit(commits: Sequence[dict[str, Any]], ts: float) -> dict[str, Any] | None:
+    """The latest of *commits* (oldest first) seen shortly before *ts*."""
+    for commit in reversed(commits):
+        if commit["ts"] <= ts + 1.0:
+            return commit if ts - commit["ts"] <= ATTRIBUTION_WINDOW else None
+    return None
+
+
+#: What the far ends of a change are worked out from: cables, addresses, sessions.
+FAR_END_REPORTS = ("lldp", "subif", "ni", "bfd", "es")
+
+
+def far_ends(store: Store) -> FarEnds | None:
+    """The far ends of changes, from the fabric as the history has it now."""
+    names = [r[0] for r in store.db.execute("SELECT DISTINCT node FROM current")]
+    if not names:
+        return None
+    try:
+        fabric = fabric_at(store, [Node(n, n) for n in names], time.time(), FAR_END_REPORTS)
+    except BeforeHistory:
+        return None
+    return FarEnds(fabric)
 
 
 def history_with_causes(store: Store, **query: Any) -> list[dict[str, Any]]:
     changes = store.history(**query)
     if not changes:
         return changes
+    # Commits on every node: one on a neighbour can be the cause.
     commits = store.history(
         since=changes[0]["ts"] - ATTRIBUTION_WINDOW,
         until=changes[-1]["ts"] + 1.0,
         reports=["config-commits"],
-        nodes=query.get("nodes", ()),
         limit=100_000,
     )
-    return attribute(changes, commits)
+    fresh = any(c["op"] == "add" and _fresh(c) for c in commits)
+    return attribute(changes, commits, far_ends(store) if fresh else None)
 
 
 # --------------------------------------------------------------------------- #

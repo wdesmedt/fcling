@@ -260,3 +260,147 @@ def test_a_commit_found_in_the_log_caused_nothing() -> None:
     assert [c["origin"] for c in out] == ["config", "unplanned"]
     assert views.attribute([synced], [fresh])[0]["origin"] == "unplanned"  # too long before
     assert views.attribute([{**synced, "ts": 30.0}], [fresh])[0]["origin"] == "config"
+
+
+# --------------------------------------------------------------------------- #
+# a commit on the far end
+# --------------------------------------------------------------------------- #
+
+
+def _far_fabric() -> Any:
+    from fcli.fabric import Fabric
+
+    ni, subif, lldp = (REGISTRY[r].record for r in ("ni", "subif", "lldp"))
+    nodes = [Node(n, n) for n in ("leaf1", "leaf2", "spine1")]
+    records = {
+        "lldp": [
+            lldp(
+                node="leaf1",
+                interface="ethernet-1/49",
+                chassis_id="s1",
+                system_name="spine1",
+                port_id="ethernet-1/1",
+            ),
+            lldp(
+                node="spine1",
+                interface="ethernet-1/1",
+                chassis_id="l1",
+                system_name="leaf1",
+                port_id="ethernet-1/49",
+            ),
+        ],
+        "subif": [
+            subif(node="leaf1", interface="ethernet-1/49", name="ethernet-1/49.0", ipv4=("192.168.1.1/31",)),
+            subif(node="spine1", interface="ethernet-1/1", name="ethernet-1/1.0", ipv4=("192.168.1.0/31",)),
+        ],
+        "ni": [ni(node="spine1", ni="default", interface="system0.0", prefixes=("10.0.0.1/32",))],
+    }
+    return Fabric.of(nodes, records)
+
+
+def _spine_commit(ts: float = 100.0) -> dict[str, Any]:
+    after = {"id": 7, "username": "ops", "comment": "rr policy"}
+    return {"ts": ts, "node": "spine1", "report": "config-commits", "op": "add", "after": after}
+
+
+def test_a_commit_is_blamed_for_what_it_did_at_the_far_end() -> None:
+    from fcli.incidents import FarEnds
+
+    ends = FarEnds(_far_fabric())
+    commit = _spine_commit()
+    peer = {"node": "leaf1", "ni": "default", "state": "active"}
+    changes = [
+        # An overlay session to the spine's loopback, and an underlay one over the cable.
+        {
+            "ts": 130.0,
+            "node": "leaf1",
+            "report": "bgp-peers",
+            "op": "change",
+            "after": {**peer, "peer": "10.0.0.1"},
+        },
+        {
+            "ts": 131.0,
+            "node": "leaf1",
+            "report": "bgp-peers",
+            "op": "change",
+            "after": {**peer, "peer": "fe80::1%ethernet-1/49.0"},
+        },  # fmt: skip
+        # The port at the near end of the cable, and a finding about the session.
+        {
+            "ts": 132.0,
+            "node": "leaf1",
+            "report": "ifstats",
+            "op": "change",
+            "after": {"name": "ethernet-1/49"},
+        },
+        {
+            "ts": 133.0,
+            "node": "leaf1",
+            "report": "checks",
+            "op": "add",
+            "after": {
+                "node": "leaf1",
+                "check": "bgp_down",
+                "severity": "error",
+                "subject": "default/10.0.0.1",
+                "detail": "session is active",
+            },
+        },  # fmt: skip
+        # Nothing to do with the spine.
+        {
+            "ts": 134.0,
+            "node": "leaf1",
+            "report": "ifstats",
+            "op": "change",
+            "after": {"name": "ethernet-1/1"},
+        },
+        {
+            "ts": 135.0,
+            "node": "leaf2",
+            "report": "bgp-peers",
+            "op": "change",
+            "after": {**peer, "peer": "10.0.0.9"},
+        },
+        # Too long after.
+        {
+            "ts": 400.0,
+            "node": "leaf1",
+            "report": "ifstats",
+            "op": "change",
+            "after": {"name": "ethernet-1/49"},
+        },
+    ]
+    out = views.attribute(changes, [commit], ends)
+    assert [c["origin"] for c in out] == ["config"] * 4 + ["unplanned"] * 3
+    assert out[0]["cause"] == "commit 7 on spine1 by ops (rr policy)"
+    assert out[0]["commit"] == {"node": "spine1", "id": 7}
+    # Without the far ends, only a commit on the change's own node counts.
+    assert {c["origin"] for c in views.attribute(changes, [commit])} == {"unplanned"}
+
+
+def test_the_latest_commit_at_either_end_is_the_cause() -> None:
+    from fcli.incidents import FarEnds
+
+    own = {
+        "ts": 110.0,
+        "node": "leaf1",
+        "report": "config-commits",
+        "op": "add",
+        "after": {"id": 3, "username": "a"},
+    }
+    change = {
+        "ts": 130.0,
+        "node": "leaf1",
+        "report": "ifstats",
+        "op": "change",
+        "after": {"name": "ethernet-1/49"},
+    }
+    ends = FarEnds(_far_fabric())
+    assert views.attribute([change], [own, _spine_commit(100.0)], ends)[0]["commit"] == {
+        "node": "leaf1",
+        "id": 3,
+    }
+    assert views.attribute([change], [own, _spine_commit(120.0)], ends)[0]["commit"] == {
+        "node": "spine1",
+        "id": 7,
+    }
