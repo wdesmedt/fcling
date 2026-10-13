@@ -219,3 +219,35 @@ def test_information_marks_nothing_unhealthy() -> None:
 
     assert health("info") == "ok {'info': 1}"
     assert health("warning") == "warning {'warning': 1}"
+
+
+def _with_mac(change: dict, node: str, address: str) -> object:
+    """The fabric with one bridge-table entry changed."""
+    records = lens_fabric.records()
+    records["mac"] = [
+        m.model_copy(update=change) if (m.node, m.address) == (node, address) else m for m in records["mac"]
+    ]
+    return dataclasses.replace(fabric(), records=records)
+
+
+def test_an_evpn_mpls_entry_is_behind_a_far_end_not_a_vtep() -> None:
+    gateway = _with_mac({"esi": "", "overlay": "", "far_end": "10.0.0.9", "label": 30001}, "leaf3", HOST_A)
+    (remote,) = [s for s in LENSES["where"].run(gateway, address=HOST_A) if s.kind == "remote"]
+    assert (remote.vtep, remote.far_end) == ("", "10.0.0.9")
+    from fcli.render import cells
+
+    assert cells(LENSES["where"], remote)["where"] == "behind 10.0.0.9 over MPLS"
+
+
+def test_a_mac_synced_from_the_segment_peer_is_learned_remote() -> None:
+    synced = _with_mac({"type": "evpn"}, "leaf2", HOST_A)
+    learned = {e.node: e.learned for e in LENSES["endpoints"].run(synced) if e.mac == HOST_A}
+    assert learned == {"leaf1": "local", "leaf2": "remote"}
+
+
+def test_a_client_without_an_lldp_name_is_named_by_its_segment_or_port() -> None:
+    records = lens_fabric.records()
+    records["lldp"] = [n for n in records["lldp"] if n.system_name != "hostA"]
+    labels = sorted(c["label"] for c in build(dataclasses.replace(fabric(), records=records))["clients"])
+    assert labels == ["ES-A", "leaf3 ethernet-1/1"]
+    assert sorted(c["label"] for c in build(fabric())["clients"]) == ["hostA", "leaf3 ethernet-1/1"]

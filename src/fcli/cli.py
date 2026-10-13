@@ -1005,7 +1005,7 @@ def _print_topology(graph: dict[str, Any], console: Console) -> None:
                 ports = ", ".join(sorted({f"{a['node']} {a['port']}" for a in c["attachments"]}))
                 es = f"  ES {c['esi']}" if c["esi"] else ""
                 console.print(
-                    f"    {c['name'] or 'client'}: {ports}{es}  [dim]{', '.join(services)}[/]",
+                    f"    {c['label']}: {ports}{es}  [dim]{', '.join(services)}[/]",
                     highlight=False,
                 )
     segments = graph["segments"]

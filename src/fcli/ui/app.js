@@ -212,7 +212,7 @@ function App() {
                                               checks=${data.checks} at=${at} onSelect=${select} /></aside>
     </main>`;
   } else if (route.view === "incidents") {
-    page = html`<main class="page"><${Incidents} incidents=${data.incidents} at=${at}
+    page = html`<main class="page"><${Incidents} incidents=${data.incidents} at=${at} started=${status?.started}
                                                  onNode=${(n) => select({ type: "node", id: n })} /></main>`;
   } else if (route.view === "history") {
     page = html`<main class="page wide"><${HistoryView} ...${shared} catalog=${catalog} /></main>`;
@@ -237,7 +237,7 @@ function App() {
                onMenu=${toggleNav} onChat=${() => setChatOpen(!chatOpen)} chatOpen=${chatOpen} />
     ${error && html`<div class="banner error">${error}</div>`}
     ${at && html`<div class="banner past">Showing the fabric as the history has it at <b>${at}</b>. Live changes are paused.</div>`}
-    <div class=${`body${navOpen ? " nav-open" : ""}${chatOpen ? " chat-open" : ""}`}>
+    <div class=${`shell${navOpen ? " nav-open" : ""}${chatOpen ? " chat-open" : ""}`}>
       <${Nav} route=${route} catalog=${catalog} incidents=${data?.incidents ?? []} collapsed=${navCollapsed}
               chatOpen=${chatOpen} onChat=${() => setChatOpen(!chatOpen)} />
       ${page}

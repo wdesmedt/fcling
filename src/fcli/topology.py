@@ -185,6 +185,10 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
             clients[owner]["attachments"] += clients.pop(key)["attachments"]
     for client in clients.values():
         client["nodes"] = sorted({a["node"] for a in client["attachments"]})
+        # What to call a host that gives no name over LLDP: its segment, else where it is.
+        names = index.segment_names.get(client["esi"], ()) if client["esi"] else ()
+        first = client["attachments"][0]
+        client["label"] = client["name"] or (names[0] if names else f"{first['node']} {first['port']}")
 
     # Neighbours facing no service, and no node of ours: outside the fabric.
     named = {c["name"] for c in clients.values()}

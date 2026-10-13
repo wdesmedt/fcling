@@ -22,7 +22,8 @@ export function layout(graph) {
   const labels = [];
   const titles = [];
   const multi = graph.components.length > 1;
-  let y = PAD;
+  // Room above the first row: cables along it arc upwards, and a path marks its nodes from above.
+  let y = PAD + 36;
   let width = 0;
   for (const component of graph.components) {
     const members = new Set(component.nodes);
@@ -245,12 +246,25 @@ export function Topology({ graph, status, checks, selected, onSelect, overlay = 
             const a = placed.nodes.get(t.from);
             const b = placed.nodes.get(t.to);
             if (!a || !b || t.from === t.to) return null;
-            // Under the row, between the nodes and their clients: the cables above stay readable.
-            const dip = Math.min(ROW * 0.55, 34 + Math.abs(a.x - b.x) * 0.06);
-            const low = Math.max(a.y, b.y) + NODE.h / 2;
-            const d = `M${a.x},${a.y + NODE.h / 2} C${a.x},${low + dip} ${b.x},${low + dip} ${b.x},${b.y + NODE.h / 2}`;
-            return html`<g class="tunnel"><path d=${d} />
-              <text x=${(a.x + b.x) / 2} y=${low + dip * 0.75 + 4}>${t.label}</text></g>`;
+            let d;
+            let label;
+            if (Math.abs(a.y - b.y) < 1) {
+              // Along a row: under it, between the nodes and their clients, so the cables above stay readable.
+              const dip = Math.min(ROW * 0.55, 34 + Math.abs(a.x - b.x) * 0.06);
+              const low = a.y + NODE.h / 2;
+              d = `M${a.x},${low} C${a.x},${low + dip} ${b.x},${low + dip} ${b.x},${low}`;
+              label = { x: (a.x + b.x) / 2, y: low + dip * 0.75 + 4 };
+            } else {
+              // Between rows: bowed out to the side, clear of the cables it rides over.
+              const [up, down] = a.y < b.y ? [a, b] : [b, a];
+              const side = up.x <= down.x ? -1 : 1;
+              const bow = side * (NODE.w * 0.45 + Math.abs(up.x - down.x) * 0.1);
+              const y1 = up.y + NODE.h / 2;
+              const y2 = down.y - NODE.h / 2;
+              d = `M${up.x + side * 20},${y1} C${up.x + bow},${y1 + (y2 - y1) * 0.4} ${down.x + bow},${y2 - (y2 - y1) * 0.4} ${down.x + side * 20},${y2}`;
+              label = { x: (up.x + down.x) / 2 + bow * 0.8, y: (y1 + y2) / 2 };
+            }
+            return html`<g class="tunnel"><path d=${d} /><text x=${label.x} y=${label.y}>${t.label}</text></g>`;
           })}
           ${graph.nodes.map((n) => {
             const p = placed.nodes.get(n.name);
@@ -282,7 +296,7 @@ export function Topology({ graph, status, checks, selected, onSelect, overlay = 
             const p = placed.clients.get(c.id);
             if (!p) return null;
             const sel = selected?.type === "client" && selected.id === c.id ? " selected" : "";
-            const label = c.name || c.attachments[0]?.port || c.id;
+            const label = c.label || c.name || c.id;
             return html`<g class=${`client${c.esi ? " multihomed" : ""}${sel}${dim(`c:${c.id}`)}${traced(`c:${c.id}`)}`}
                            transform=${`translate(${p.x - CLIENT.w / 2},${p.y - CLIENT.h / 2})`}
                            onClick=${pick({ type: "client", id: c.id })} onPointerDown=${(e) => e.stopPropagation()}>
@@ -415,7 +429,7 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
       ${clients.length > 0 &&
       html`<h3>Clients</h3>
         <ul class="rows">${clients.map(
-          (c) => html`<li><a onClick=${() => onSelect({ type: "client", id: c.id })}>${c.name || c.id}</a>
+          (c) => html`<li><a onClick=${() => onSelect({ type: "client", id: c.id })}>${c.label || c.name || c.id}</a>
             <span class="muted mono">${c.attachments.filter((a) => a.node === n.name).map((a) => a.port).filter((p, i, all) => all.indexOf(p) === i).join(", ")}</span></li>`,
         )}</ul>`}
     </div>`;
@@ -443,7 +457,7 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
   if (!c) return html`<div class="details"><p class="muted">That client is not in this view.</p></div>`;
   const segment = graph.segments.find((s) => s.esi && s.esi === c.esi);
   return html`<div class="details">
-    <h2>${c.name || c.id}</h2>
+    <h2>${c.label || c.name || c.id}</h2>
     <dl class="facts">
       ${c.esi && html`<dt>segment</dt><dd>${segment?.names.join(" / ") || ""} <span class="mono muted">${c.esi}</span></dd>`}
       ${segment && html`<dt>mode</dt><dd>${segment.mode}</dd>`}

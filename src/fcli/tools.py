@@ -433,7 +433,7 @@ async def get_topology(service: Service, args: _TopologyInput) -> Any:
         ],
         "clients": [
             {
-                "name": c["name"] or c["id"],
+                "name": c["label"],
                 "esi": c["esi"],
                 "ports": sorted({f"{a['node']} {a['port']}" for a in c["attachments"]}),
                 "services": sorted({a["service"] for a in c["attachments"]}),

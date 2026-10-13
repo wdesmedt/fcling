@@ -762,7 +762,7 @@ main.page {
   padding: 4px 14px 10px 14px;
 }
 
-.incident .body {
+.incident .incident-body {
   padding: 0 14px 14px;
   border-top: 1px solid var(--line);
 }
@@ -881,14 +881,14 @@ ul.changes .cause {
 
 /* -------------------------------------------------------------- the shell */
 
-.body {
+.shell {
   flex: 1;
   display: flex;
   min-height: 0;
   position: relative;
 }
 
-.body > main {
+.shell > main {
   flex: 1;
   min-width: 0;
 }
@@ -1588,7 +1588,7 @@ aside.chat .context {
     display: revert;
   }
 
-  .body.nav-open nav.side {
+  .shell.nav-open nav.side {
     transform: none;
   }
 
@@ -1615,4 +1615,16 @@ aside.chat .context {
   form.lens-form label {
     flex: 1 1 100%;
   }
+}
+
+.note {
+  background: var(--warning-soft);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.link-button.inline {
+  margin: 0 0 0 6px;
+  padding: 0;
+  color: var(--accent);
 }

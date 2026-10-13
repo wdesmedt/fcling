@@ -44,8 +44,10 @@ class Sighting(Record):
     mac: str = ""
     ip: str = ""
     origin: str = ""
-    #: Where the MAC sits: the VTEP it is behind, the segment it is on or behind.
+    #: Where the MAC sits: the VTEP it is behind, or the far end of an EVPN-MPLS
+    #: entry, and the segment it is on or behind.
     vtep: str = ""
+    far_end: str = ""
     esi: str = ""
     segment: str = ""
     #: A binding's MAC, followed into the bridge table behind its irb.
@@ -67,6 +69,8 @@ def _where(s: Sighting) -> str:
         parts.append(f"in {s.bridge_ni} on {s.learned_on}")
     if s.vtep:
         parts.append(f"behind VTEP {s.vtep}")
+    if s.far_end:
+        parts.append(f"behind {s.far_end} over MPLS")
     if s.esi:
         # Learned on a port of the segment here; or learned behind it, elsewhere.
         on = "on" if s.learned_on or s.kind in ("local", "multihomed", "duplicate") else "behind"
@@ -99,7 +103,8 @@ def _follow(index: Index, node: str, interface: str, address: str) -> dict[str, 
     return {
         "bridge_ni": bridge,
         "learned_on": place.via if place.local else "",
-        "vtep": "" if place.local else place.via,
+        "vtep": "" if place.local or entry.far_end else place.via,
+        "far_end": entry.far_end,
         "esi": place.esi,
         "segment": place.segment,
     }
@@ -148,7 +153,8 @@ def _mac(index: Index, target: str) -> Iterator[Sighting]:
             interface=place.via if e.local else e.overlay,
             mac=target,
             origin=e.type,
-            vtep="" if e.local else place.via,
+            vtep="" if e.local or e.far_end else place.via,
+            far_end=e.far_end,
             esi=place.esi,
             segment=place.segment,
             also_on=also,

@@ -35,7 +35,7 @@ class Endpoint(Record):
     #: here, or on a multihomed segment's peer, this node's port on the segment.
     subinterface: str = ""
     #: ``local``: learned here. ``remote``: learned by a peer on a segment this
-    #: node is also on.
+    #: node is also on - over the overlay, or synced to this node's own port.
     learned: str = ""
     esi: str = ""
     es: str = ""
@@ -79,7 +79,8 @@ def endpoints(fabric: Fabric) -> Iterator[Endpoint]:
                 return None
             return {
                 "subinterface": place.via,
-                "learned": "local",
+                # A segment peer's MAC, synced over EVPN onto this node's port of the segment.
+                "learned": "remote" if entry.type.startswith("evpn") else "local",
                 "esi": place.esi,
                 "es": place.segment,
                 "lldp": index.heard_on(node, parent(place.via)),
