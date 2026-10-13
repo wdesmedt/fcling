@@ -265,10 +265,30 @@ main.split {
   min-width: 0;
 }
 
+main.split.details-collapsed {
+  grid-template-columns: 1fr 36px;
+}
+
 main.split aside.details-pane {
+  position: relative;
   background: var(--panel);
   border-left: 1px solid var(--line);
   overflow: auto;
+}
+
+.pane-toggle {
+  position: absolute;
+  top: 12px;
+  right: 8px;
+  z-index: 1;
+  min-width: 22px;
+  padding: 2px 6px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+main.split:not(.details-collapsed) .details h2 {
+  padding-right: 28px;
 }
 
 .topology {
@@ -874,6 +894,15 @@ ul.changes .cause {
   main.split aside.details-pane {
     border-left: none;
     border-top: 1px solid var(--line);
+  }
+
+  main.split.details-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 40px;
+  }
+
+  .pane-toggle {
+    transform: rotate(90deg);
   }
 
   ul.changes li {

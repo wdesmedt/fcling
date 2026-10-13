@@ -155,7 +155,8 @@ const hasTrouble = (counts) => (counts?.error ? "error" : counts?.warning ? "war
 function useViewport(box, width, height) {
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const fitted = useRef(false);
+  // Fitted to the window until panned or zoomed; Fit hands it back.
+  const moved = useRef(false);
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
       setSize({ w: entry.contentRect.width, h: entry.contentRect.height });
@@ -164,16 +165,18 @@ function useViewport(box, width, height) {
     return () => observer.disconnect();
   }, []);
   const fit = () => {
+    moved.current = false;
     const k = Math.min(size.w / width, size.h / height, 1.6);
     setView({ k, x: (size.w - width * k) / 2, y: Math.max(0, (size.h - height * k) / 2) });
   };
+  const move = (next) => {
+    moved.current = true;
+    setView(next);
+  };
   useEffect(() => {
-    if (!fitted.current && size.w > 0 && size.h > 0 && width > 0) {
-      fitted.current = true;
-      fit();
-    }
+    if (!moved.current && size.w > 0 && size.h > 0 && width > 0) fit();
   }, [size, width, height]);
-  return { view, setView, fit };
+  return { view, setView: move, fit };
 }
 
 /**

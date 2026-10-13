@@ -131,6 +131,7 @@ function App() {
   const [connection, setConnection] = useState("connecting");
   const [navCollapsed, setNavCollapsed] = useState(() => stored("fcli-nav", "") === "collapsed");
   const [navOpen, setNavOpen] = useState(false); // narrow screens: the panel over the page
+  const [detailsCollapsed, setDetailsCollapsed] = useState(() => stored("fcli-details", "") === "collapsed");
   const [chatOpen, setChatOpen] = useState(false);
   const [, setTick] = useState(0);
   const atRef = useRef(at);
@@ -216,6 +217,15 @@ function App() {
       setNavCollapsed(!navCollapsed);
     }
   };
+  const toggleDetails = (collapsed = !detailsCollapsed) => {
+    store("fcli-details", collapsed ? "collapsed" : null);
+    setDetailsCollapsed(collapsed);
+  };
+  // Picking something on the map is asking for its details.
+  const selected = route.selection ? `${route.selection.type}|${route.selection.id}` : "";
+  useEffect(() => {
+    if (selected) toggleDetails(false);
+  }, [selected]);
   const select = (selection) => go(selection ? `topology/${selection.type}/${encodeURIComponent(selection.id)}` : "topology");
   const shared = { go, at, graph: data?.topology, status, checks: data?.checks ?? [], query: route.query };
 
@@ -223,12 +233,19 @@ function App() {
   if (!data) {
     page = html`<main class="loading">${error ? "" : "Reading the fabric…"}</main>`;
   } else if (route.view === "topology") {
-    page = html`<main class="split">
+    page = html`<main class=${`split${detailsCollapsed ? " details-collapsed" : ""}`}>
       <${Topology} graph=${data.topology} status=${status} checks=${data.checks} selected=${route.selection} onSelect=${select}
                    paint=${paint} overlay=${picked?.nodes.size ? picked : null}
                    controls=${html`<${OverlayControls} graph=${data.topology} settings=${overlaySettings} />`} />
-      <aside class="details-pane"><${Details} selection=${route.selection} graph=${data.topology} status=${status}
-                                              checks=${data.checks} at=${at} onSelect=${select} /></aside>
+      <aside class="details-pane">
+        <button class="pane-toggle" onClick=${() => toggleDetails()} aria-expanded=${!detailsCollapsed}
+                title=${detailsCollapsed ? "Show the details panel" : "Hide the details panel"}>
+          ${detailsCollapsed ? "‹" : "›"}
+        </button>
+        ${!detailsCollapsed &&
+        html`<${Details} selection=${route.selection} graph=${data.topology} status=${status}
+                         checks=${data.checks} at=${at} onSelect=${select} />`}
+      </aside>
     </main>`;
   } else if (route.view === "incidents") {
     page = html`<main class="page"><${Incidents} incidents=${data.incidents} at=${at} started=${status?.started}
