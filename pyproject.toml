@@ -1,0 +1,81 @@
+[project]
+name = "fcli"
+dynamic = ["version"]
+description = "Fabric CLI: what an SR Linux fabric looks like, what is wrong with it, and what changed"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+authors = [
+    { name = "Walter De Smedt", email = "walter.de.smedt@gmail.com" },
+]
+dependencies = [
+    "grpcio>=1.84",
+    "protobuf>=7.35.1",
+    "pydantic>=2.8",
+    "click>=8.1",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+    "cryptography>=42",
+]
+
+[project.scripts]
+fcli = "fcli.cli:main"
+
+[project.optional-dependencies]
+server = [
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+]
+mcp = [
+    "mcp>=2.3",
+]
+ai = [
+    "anthropic>=1.13",
+    "openai>=3.29",
+]
+
+[dependency-groups]
+dev = [
+    "fcli[server,mcp,ai]",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "grpcio-tools>=1.84",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-pyyaml",
+    "httpx2>=2.13.1",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/fcli/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fcli"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+extend-exclude = ["src/fcli/gnmi/proto"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.11"
+exclude = ["src/fcli/gnmi/proto/"]
+
+[[tool.mypy.overrides]]
+module = ["fcli.gnmi.proto.*", "grpc.*"]
+ignore_missing_imports = true
+ignore_errors = true
