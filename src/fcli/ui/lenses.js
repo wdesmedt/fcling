@@ -222,6 +222,66 @@ const KINDS = [
 ];
 const uniq = (values) => [...new Set(values)].sort(natural);
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const fEq = (v) => `=${v}`;
+const carrierKey = (node, name) => `${node}|${name}`;
+
+/** The network-instance report, narrowed to instance *name* on *nodes*. */
+function goNetworkInstance(nodes, name, go) {
+  // Column filters, not node=: the server takes one node per parameter, and the report is live anyway.
+  go(withQuery("report/ni", { "f.NI": fEq(name), "f.Node": [].concat(nodes).map(fEq).join("|") }));
+}
+
+/** The Services lens on *name*'s card, with *node*'s row open. */
+function goServiceCard(kind, name, node, go) {
+  go(withQuery("lens/service", { kind, name, node }));
+}
+
+/** A mac-vrf in a router's row: opens its Bridge Domain card. */
+function BridgeDomainLink({ node, name, go }) {
+  return html`<a class="mono" title=${`${name}'s Bridge Domain card`} onClick=${(e) => {
+    e.stopPropagation();
+    goServiceCard("mac-vrf", name, node, go);
+  }}>${name}</a>`;
+}
+
+/** A network-instance name that opens it in the network-instance report. */
+function NiLink({ nodes, name, go }) {
+  return html`<a class="mono" title=${`${name} in the network-instance report`} onClick=${(e) => {
+    e.stopPropagation();
+    goNetworkInstance(nodes, name, go);
+  }}>${name}</a>`;
+}
+
+function bgpPeerAddress(peer) {
+  const m = /^\s*(.+?)\s+\([^)]*\)\s*$/.exec(String(peer));
+  return (m ? m[1] : String(peer)).trim();
+}
+
+function goBgpPeer(node, ni, peer, go) {
+  go(withQuery("report/bgp-peers", { node, "f.NI": fEq(ni), "f.peer": fEq(bgpPeerAddress(peer)) }));
+}
+
+function goEthernetSegment(node, segment, go) {
+  const params = { node };
+  if (segment.name) params["f.name"] = fEq(segment.name);
+  else if (segment.esi) params["f.esi"] = fEq(segment.esi);
+  go(withQuery("report/es", params));
+}
+
+function parseVirtualEs(label) {
+  const m = /^(.+?)\s*\(/.exec(label);
+  return (m ? m[1] : label).trim();
+}
+
+/** ``vES-host6 (10.1.4.16, 10.1.4.17)`` -> its next-hops. */
+function virtualEsHops(label) {
+  const m = /\(([^)]*)\)\s*$/.exec(label);
+  return m ? m[1].split(",").map((h) => h.trim()).filter(Boolean) : [];
+}
+
+function interleave(items, sep = ", ") {
+  return items.flatMap((item, i) => (i ? [sep, item] : [item]));
+}
 /** The bgp-vpn instances on a carrier's own site side: all but a gateway's WAN side. */
 const siteSide = (r) => r.vpn.filter((v) => !r.wan.includes(v.id));
 const wanSide = (r) => r.vpn.filter((v) => r.wan.includes(v.id));
@@ -283,56 +343,121 @@ const Pills = ({ card }) => html`
 
 const rts = (vpn, side) => uniq(vpn.flatMap((v) => v[side])).join(", ") || "-";
 
+function DetailSection({ title, children }) {
+  const [open, setOpen] = useState(true);
+  if (!children) return null;
+  return html`<section class=${`carrier-detail-section${open ? "" : " folded"}`}>
+    <h4 role="button" aria-expanded=${open} onClick=${() => setOpen(!open)}>
+      <span class="caret">${open ? "▾" : "▸"}</span> ${title}
+    </h4>
+    ${open && children}
+  </section>`;
+}
+
 function NodeDetail({ r, go }) {
+  const peerNi = r.type === "ip-vrf" ? r.name : "";
+  // A record from before sessions were kept has the addresses alone.
+  const sessions = r.bgp_sessions?.length
+    ? r.bgp_sessions
+    : r.bgp_peers.map((peer) => ({ peer: bgpPeerAddress(peer), state: "" }));
   return html`<div class="carrier-detail">
-    <p><${Tables} type=${r.type} names=${[r.name]} nodes=${[r.node]} go=${go} /></p>
+    <div class="carrier-detail-toolbar">
+      <${Tables} type=${r.type} names=${[r.name]} nodes=${[r.node]} go=${go} />
+    </div>
     ${r.ports.length > 0 &&
-    html`<table class="mini">
-      <thead><tr><th>port</th><th>kind</th><th>oper</th><th>VLAN</th><th>segment</th><th>to / addresses</th></tr></thead>
-      <tbody>${r.ports.map(
-        (p) => html`<tr>
-          <td class="mono">${p.name}</td><td>${p.kind}</td>
-          <td><span class=${`pill state-${p.oper === "up" ? "up" : "down"}`}>${p.oper || "?"}</span></td>
-          <td>${p.vlan ?? ""}</td><td>${p.segment || p.esi || ""}</td>
-          <td class="mono">${[p.peer_ni, ...(p.addresses || [])].filter(Boolean).join(", ")}</td>
-        </tr>`,
-      )}</tbody>
-    </table>`}
-    <table class="mini">
-      <thead><tr><th>bgp-vpn</th><th>side</th><th>RD</th><th>import</th><th>export</th></tr></thead>
-      <tbody>${r.vpn.map(
-        (v) => html`<tr>
-          <td>${v.id}</td><td>${r.wan.includes(v.id) ? "WAN" : r.site || "fabric"}</td><td class="mono">${v.rd || "-"}</td>
-          <td class="mono">${v.import_rts.join(", ") || "-"}</td><td class="mono">${v.export_rts.join(", ") || "-"}</td>
-        </tr>`,
-      )}</tbody>
-    </table>
-    ${r.subnets.length > 0 && html`<p><span class="muted">subnets</span> <span class="mono">${r.subnets.join(", ")}</span></p>`}
-    ${r.bgp_peers.length > 0 && html`<p><span class="muted">BGP peers</span> <span class="mono">${r.bgp_peers.join(", ")}</span></p>`}
-    ${r.virtual_es.length > 0 && html`<p><span class="muted">virtual segments</span> ${r.virtual_es.join(", ")}</p>`}
+    html`<${DetailSection} title="Interfaces">
+      <table class="mini">
+        <thead><tr><th>interface</th><th>kind</th><th>oper</th><th>VLAN</th><th>segment</th><th>to / addresses</th></tr></thead>
+        <tbody>${r.ports.map(
+          (p) => html`<tr>
+            <td class="mono">${p.name}</td><td>${p.kind}</td>
+            <td><span class=${`pill state-${p.oper === "up" ? "up" : "down"}`}>${p.oper || "?"}</span></td>
+            <td>${p.vlan ?? ""}</td>
+            <td>${p.segment || p.esi
+              ? html`<a class="mono" onClick=${() => goEthernetSegment(r.node, { name: p.segment, esi: p.esi }, go)}>${p.segment || p.esi}</a>`
+              : ""}</td>
+            <td class="mono">
+              ${p.peer_ni &&
+              (r.type === "ip-vrf"
+                ? html`<${BridgeDomainLink} node=${r.node} name=${p.peer_ni} go=${go} />`
+                : html`<${NiLink} nodes=${r.node} name=${p.peer_ni} go=${go} />`)}
+              ${p.peer_ni && (p.addresses || []).length ? ", " : ""}${(p.addresses || []).join(", ")}
+            </td>
+          </tr>`,
+        )}</tbody>
+      </table>
+    </${DetailSection}>`}
+    ${r.vpn.length > 0 &&
+    html`<${DetailSection} title="BGP VPN">
+      <table class="mini">
+        <thead><tr><th>bgp-instance</th><th>side</th><th>RD</th><th>import</th><th>export</th></tr></thead>
+        <tbody>${r.vpn.map(
+          (v) => html`<tr>
+            <td>${v.id}</td><td>${r.wan.includes(v.id) ? "WAN" : r.site || "fabric"}</td><td class="mono">${v.rd || "-"}</td>
+            <td class="mono">${v.import_rts.join(", ") || "-"}</td><td class="mono">${v.export_rts.join(", ") || "-"}</td>
+          </tr>`,
+        )}</tbody>
+      </table>
+    </${DetailSection}>`}
+    ${sessions.length > 0 &&
+    html`<${DetailSection} title="BGP peers">
+      <table class="mini">
+        <thead><tr><th>peer</th><th>state</th></tr></thead>
+        <tbody>${sessions.map(
+          (s) => html`<tr key=${s.peer}>
+            <td><a class="mono" onClick=${() => goBgpPeer(r.node, peerNi || r.name, s.peer, go)}>${s.peer}</a></td>
+            <td>${s.state
+              ? html`<span class=${`pill session state-${s.state === "established" ? "up" : "down"}`} title=${s.state}>
+                  ${s.state === "established" ? "UP" : "DOWN"}</span>`
+              : html`<span class="muted">?</span>`}</td>
+          </tr>`,
+        )}</tbody>
+      </table>
+    </${DetailSection}>`}
+    ${r.virtual_es.length > 0 &&
+    html`<${DetailSection} title="Segments">
+      <table class="mini">
+        <thead><tr><th>segment</th><th>next-hop</th></tr></thead>
+        <tbody>${r.virtual_es.map((label) => {
+          const name = parseVirtualEs(label);
+          return html`<tr key=${label}>
+            <td><a class="mono" onClick=${() => goEthernetSegment(r.node, { name }, go)}>${name}</a></td>
+            <td class="mono">${virtualEsHops(label).join(", ") || "-"}</td>
+          </tr>`;
+        })}</tbody>
+      </table>
+    </${DetailSection}>`}
     ${r.issues.map((i) => html`<p class="error-text">${i}</p>`)}
   </div>`;
 }
 
-function Carriers({ rows, names, open, onOpen, go }) {
+function Carriers({ rows, open, onToggle, go }) {
   const bridged = rows[0]?.type === "mac-vrf";
-  const cols = 7 + (names > 1) + bridged;
+  const cols = 9 + bridged;
+  // A row's own instance and the ones its irbs join: a mac-vrf's ip-vrf, an ip-vrf's mac-vrfs.
+  const vrfs = (r, kind) => (r.type === kind ? [r.name] : r.linked);
+  const vrfLink = (r, kind, n) =>
+    r.type === "ip-vrf" && kind === "mac-vrf"
+      ? html`<${BridgeDomainLink} key=${n} node=${r.node} name=${n} go=${go} />`
+      : html`<${NiLink} key=${n} nodes=${r.node} name=${n} go=${go} />`;
+  const vrfCell = (r, kind) => (vrfs(r, kind).length ? interleave(vrfs(r, kind).map((n) => vrfLink(r, kind, n))) : "-");
   return html`<table class="carriers">
     <thead><tr>
-      <th>node</th>${names > 1 && html`<th>name</th>`}<th>oper</th><th>VNI</th><th>EVI</th><th>route-targets</th>
+      <th>node</th><th>mac-vrf</th><th>ip-vrf</th><th>oper</th><th>VNI</th><th>EVI</th><th>route-targets</th>
       <th>access / irb</th>${bridged && html`<th>MACs</th>`}<th></th>
     </tr></thead>
     <tbody>${rows.map((r) => {
-      const key = `${r.node}|${r.name}`;
+      const key = carrierKey(r.node, r.name);
+      const isOpen = open.has(key);
       const access = r.ports.filter((p) => p.kind !== "irb").map((p) => p.name + (p.segment ? ` ${p.segment}` : ""));
       const irb = r.ports.filter((p) => p.kind === "irb").map((p) => (p.peer_ni ? `${p.name} → ${p.peer_ni}` : p.name));
       const side = siteSide(r);
       return html`
-        <tr class=${`carrier${open === key ? " open" : ""}${r.issues.length ? " bad" : ""}`} onClick=${() => onOpen(open === key ? "" : key)}>
-          <td><span class="caret">${open === key ? "▾" : "▸"}</span>
+        <tr class=${`carrier${isOpen ? " open" : ""}${r.issues.length ? " bad" : ""}`} onClick=${() => onToggle(key)}>
+          <td><span class="caret">${isOpen ? "▾" : "▸"}</span>
             <a onClick=${(e) => { e.stopPropagation(); go(`topology/node/${encodeURIComponent(r.node)}`); }}>${r.node}</a>
             ${r.gateway && html` <span class="pill gw" title="stitches its site to the WAN">GW</span>`}</td>
-          ${names > 1 && html`<td class="mono">${r.name}</td>`}
+          <td>${vrfCell(r, "mac-vrf")}</td><td>${vrfCell(r, "ip-vrf")}</td>
           <td><span class=${`pill state-${r.oper === "up" ? "up" : "down"}`}>${r.oper || "?"}</span></td>
           <td>${r.vnis.join(", ") || "-"}</td><td>${r.evis.join(", ") || "-"}</td>
           <td class="mono">${rts(side, "import_rts")}${rts(side, "export_rts") !== rts(side, "import_rts") ? html` <span class="muted">/ ${rts(side, "export_rts")}</span>` : ""}</td>
@@ -340,7 +465,7 @@ function Carriers({ rows, names, open, onOpen, go }) {
           ${bridged && html`<td>${r.macs_local} <span class="muted">/ ${r.macs_remote}</span></td>`}
           <td>${r.issues.length > 0 && html`<span class="pill error">${plural(r.issues.length, "issue")}</span>`}</td>
         </tr>
-        ${open === key && html`<tr class="carrier-row"><td colspan=${cols}><${NodeDetail} r=${r} go=${go} /></td></tr>`}`;
+        ${isOpen && html`<tr class="carrier-row"><td colspan=${cols}><${NodeDetail} r=${r} go=${go} /></td></tr>`}`;
     })}</tbody>
   </table>`;
 }
@@ -396,13 +521,35 @@ function Tables({ type, names, nodes, go }) {
   )}</span>`;
 }
 
-function Card({ card, expanded, onToggle, go }) {
-  const [open, setOpen] = useState("");
+function Card({ card, expanded, onToggle, go, focusCarrier = "" }) {
+  // Every node row opened stays open until closed: comparing nodes means reading them side by side.
+  const focused = () =>
+    focusCarrier && card.rows.some((r) => carrierKey(r.node, r.name) === focusCarrier) ? [focusCarrier] : [];
+  const [open, setOpen] = useState(() => new Set(focused()));
+  useEffect(() => {
+    const keys = focused();
+    if (keys.length) setOpen((s) => new Set([...s, ...keys]));
+  }, [focusCarrier, card.id]);
+  const toggle = (key) =>
+    setOpen((s) => {
+      const next = new Set(s);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allKeys = card.part === "wan" ? [] : card.rows.map((r) => carrierKey(r.node, r.name));
   const bySite = card.sites.map((s) => [s, card.rows.filter((r) => r.site === s)]);
+  const title = interleave(
+    card.names.map(
+      (name) => html`<${NiLink} key=${name} name=${name} go=${go}
+                               nodes=${card.rows.filter((r) => r.name === name).map((r) => r.node)} />`,
+    ),
+    " / ",
+  );
   return html`<section class=${`service-card${expanded ? " expanded" : ""}${card.issues ? " bad" : ""}`}>
     <header onClick=${onToggle}>
       <span class="caret">${expanded ? "▾" : "▸"}</span>
-      <h3 class="mono">${card.names.join(" / ")}</h3>
+      <h3 class="mono">${title}</h3>
       <${Pills} card=${card} />
       <span class="card-facts muted">${facts(card).join(" · ")}</span>
       ${card.part !== "wan" && card.type === "ip-vrf" && card.subnets.map((s) => html`<span class="pill subnet">${s}</span>`)}
@@ -410,11 +557,16 @@ function Card({ card, expanded, onToggle, go }) {
     </header>
     ${expanded &&
     html`<div class="card-body">
+      ${allKeys.length > 1 &&
+      html`<div class="card-tools">
+        <button class="small" disabled=${open.size === allKeys.length} onClick=${() => setOpen(new Set(allKeys))}>Expand all</button>
+        <button class="small" disabled=${open.size === 0} onClick=${() => setOpen(new Set())}>Collapse all</button>
+      </div>`}
       ${card.part !== "wan" &&
       bySite.map(
         ([site, rows]) => html`<div class="card-section">
           ${(site || card.dci) && html`<h4>${site ? site[0].toUpperCase() + site.slice(1) : "Fabric"}</h4>`}
-          <${Carriers} rows=${rows} names=${card.names.length} open=${open} onOpen=${setOpen} go=${go} />
+          <${Carriers} rows=${rows} open=${open} onToggle=${toggle} go=${go} />
         </div>`,
       )}
       ${card.dci && card.part !== "site" &&
@@ -431,7 +583,17 @@ export function ServiceView({ query, go, at }) {
   const all = useMemo(() => cards(state.answer?.records ?? []), [state.answer]);
   const kind = query.kind || (query.name && all.find((c) => c.names.includes(query.name))?.type) || "mac-vrf";
   const [find, setFind] = useState(query.name || "");
+  // A link to another service names it: the box follows, or it would filter the card out.
+  useEffect(() => setFind(query.name || ""), [query.name]);
   const term = find.trim().toLowerCase();
+  const focusCarrier = query.node && query.name ? carrierKey(query.node, query.name) : "";
+  const lensQuery = (extra) =>
+    withQuery("lens/service", {
+      kind,
+      ...(query.name ? { name: query.name } : {}),
+      ...(query.node ? { node: query.node } : {}),
+      ...extra,
+    });
   const shown = all
     .filter((c) => c.type === kind)
     .filter((c) => !term || c.names.some((n) => n.toLowerCase().includes(term)) || c.nodes.some((n) => n.toLowerCase().includes(term)))
@@ -441,14 +603,21 @@ export function ServiceView({ query, go, at }) {
   const toggle = (id) => {
     const next = new Set(openSet);
     next.has(id) ? next.delete(id) : next.add(id);
-    go(withQuery("lens/service", { kind, open: [...next].join(",") }));
+    go(lensQuery({ open: [...next].join(",") }));
   };
   const counts = Object.fromEntries(KINDS.map(([k]) => [k, all.filter((c) => c.type === k).length]));
   const sites = uniq(all.flatMap((c) => c.sites).filter(Boolean));
   return html`<div class="lens">
     <div class="filters">
       <span class="segmented">${KINDS.map(
-        ([k, label]) => html`<button class=${k === kind ? "on" : ""} onClick=${() => go(withQuery("lens/service", { kind: k }))}>
+        ([k, label]) => html`<button class=${k === kind ? "on" : ""} onClick=${() =>
+          go(
+            withQuery("lens/service", {
+              kind: k,
+              ...(query.name ? { name: query.name } : {}),
+              ...(query.node ? { node: query.node } : {}),
+            }),
+          )}>
           ${label} <span class="tab-count">${counts[k]}</span></button>`,
       )}</span>
       <input class="card-find" value=${find} onInput=${(e) => setFind(e.target.value)}
@@ -457,7 +626,10 @@ export function ServiceView({ query, go, at }) {
     </div>
     <${Result} state=${state}>
       ${shown.length
-        ? shown.map((c) => html`<${Card} key=${c.id} card=${c} expanded=${openSet.has(c.id)} onToggle=${() => toggle(c.id)} go=${go} />`)
+        ? shown.map((c) =>
+            html`<${Card} key=${c.id} card=${c} expanded=${openSet.has(c.id)} onToggle=${() => toggle(c.id)} go=${go}
+                         focusCarrier=${focusCarrier} />`,
+          )
         : html`<p class="muted">No ${KINDS.find(([k]) => k === kind)[1].toLowerCase()}${term ? ` match ${find}` : ""}.</p>`}
     </${Result}>
   </div>`;

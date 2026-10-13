@@ -439,7 +439,7 @@ function Findings({ findings, empty = "No findings." }) {
     ${faults.length ? html`<${FindingList} findings=${faults} />` : html`<p class="muted">No errors or warnings.</p>`}
     ${info.length > 0 &&
     html`<button class="link-button" onClick=${() => setShowInfo(!showInfo)}>
-        ${showInfo ? "▾" : "▸"} ${info.length} for information
+        <span class="caret">${showInfo ? "▾" : "▸"}</span> ${info.length} for information
       </button>
       ${showInfo && html`<${FindingList} findings=${info} />`}`}`;
 }

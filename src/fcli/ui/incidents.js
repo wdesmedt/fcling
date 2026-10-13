@@ -15,37 +15,87 @@ function keyText(key) {
   }
 }
 
+const SHORT = 60;
+const SHOWN_FIELDS = 4;
+
+const text = (value) => (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value));
+const empty = (value) => value === null || value === undefined || value === "";
+
 function short(value) {
-  if (value === null || value === undefined || value === "") return "—";
-  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
-  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
+  if (empty(value)) return "—";
+  const t = text(value);
+  return t.length > SHORT ? `${t.slice(0, SHORT - 1)}…` : t;
 }
 
-/** One change, as what moved: the fields that differ, or the record that came or went. */
+/** A value in full: objects indented, so a next-hop reads as one. */
+const full = (value) => (empty(value) ? "—" : typeof value === "object" ? JSON.stringify(value, null, 2) : String(value));
+
+/** A list entry on one line: a flat record as its non-empty key=value pairs. */
+function entry(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return full(value);
+  const flat = Object.values(value).every((v) => typeof v !== "object" || v === null || (Array.isArray(v) && !v.length));
+  if (!flat) return full(value);
+  return Object.entries(value)
+    .filter(([, v]) => !empty(v) && !(Array.isArray(v) && !v.length))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("  ");
+}
+
+/** One field's change in full: a list as the entries that went and came, anything else before → after. */
+function FieldChange({ name, before, after }) {
+  if (Array.isArray(before) || Array.isArray(after)) {
+    const was = (before || []).map(text);
+    const now = (after || []).map(text);
+    const gone = (before || []).filter((_, i) => !now.includes(was[i]));
+    const came = (after || []).filter((_, i) => !was.includes(now[i]));
+    return html`<div class="field-change"><b>${name}</b>
+      ${gone.map((v) => html`<pre class="gone">− ${entry(v)}</pre>`)}
+      ${came.map((v) => html`<pre class="came">+ ${entry(v)}</pre>`)}
+      ${!gone.length && !came.length && html`<span class="muted"> reordered</span>`}
+    </div>`;
+  }
+  return html`<div class="field-change"><b>${name}</b>
+    <pre class="gone">− ${full(before)}</pre><pre class="came">+ ${full(after)}</pre>
+  </div>`;
+}
+
+/** One change, as what moved: the fields that differ, or the record that came or went.
+ *  The line is a summary; clicked, it opens on every field in full. */
 export function Change({ change }) {
+  const [open, setOpen] = useState(false);
   const before = change.before || {};
   const after = change.after || {};
   let what;
+  let detail = null;
+  let more = false;
   if (change.op === "change") {
     const fields = Object.keys(after).filter(
       (k) => k !== "node" && JSON.stringify(before[k]) !== JSON.stringify(after[k]),
     );
-    what = fields.slice(0, 4).map(
+    what = fields.slice(0, SHOWN_FIELDS).map(
       (k) => html`<span class="delta"><b>${k}</b> ${short(before[k])} → ${short(after[k])}</span>`,
     );
+    more = fields.length > SHOWN_FIELDS || fields.some((k) => text(before[k] ?? "").length > SHORT || text(after[k] ?? "").length > SHORT);
+    detail = fields.map((k) => html`<${FieldChange} name=${k} before=${before[k]} after=${after[k]} />`);
   } else if (change.report === "checks") {
     const f = change.op === "add" ? after : before;
     what = html`<span>${change.op === "add" ? "raised" : "cleared"}: <b>${f.check}</b> ${f.subject} — ${f.detail}</span>`;
   } else {
     what = html`<span class="mono">${keyText(change.key)}</span>`;
+    const record = change.op === "add" ? after : before;
+    const fields = Object.keys(record).filter((k) => k !== "node" && !empty(record[k]));
+    more = fields.length > 0;
+    detail = html`<dl class="record">${fields.map((k) => html`<dt>${k}</dt><dd><pre>${full(record[k])}</pre></dd>`)}</dl>`;
   }
-  return html`<li class=${`change op-${change.op}`}>
-    <span class="when mono">${clock(change.ts)}</span>
+  return html`<li class=${`change op-${change.op}${more ? " expandable" : ""}${open ? " open" : ""}`}
+                  onClick=${more ? () => setOpen(!open) : undefined}>
+    <span class="when mono">${more && html`<span class="caret">${open ? "▾" : "▸"}</span>`}${clock(change.ts)}</span>
     <span class="who">${change.node}</span>
     <span class="report">${change.report}</span>
     <span class=${`op ${change.op}`}>${change.op}</span>
     <span class="what">${what}</span>
     ${change.cause && html`<span class="cause">← ${change.cause}</span>`}
+    ${open && html`<div class="change-detail" onClick=${(e) => e.stopPropagation()}>${detail}</div>`}
   </li>`;
 }
 
@@ -111,7 +161,7 @@ function Incident({ incident, open, onToggle, onNode, at, started }) {
         ${incident.kind} · ${findings.length} finding${findings.length > 1 ? "s" : ""}
         ${incident.first_seen && html` · since ${ago(incident.first_seen)}`}
       </span>
-      <span class="chevron">${open ? "▾" : "▸"}</span>
+      <span class="caret">${open ? "▾" : "▸"}</span>
     </header>
     <div class="nodes">
       ${incident.nodes.slice(0, 12).map((n) => html`<a class="chip" onClick=${() => onNode(n)}>${n}</a>`)}
@@ -164,7 +214,7 @@ export function Incidents({ incidents, at, onNode, started }) {
     ${info.length > 0 &&
     html`<section class="info-section">
       <button class="link-button" onClick=${() => setShowInfo(!showInfo)}>
-        ${showInfo ? "▾" : "▸"} Information (${info.length}): often by design
+        <span class="caret">${showInfo ? "▾" : "▸"}</span> Information (${info.length}): often by design
       </button>
       ${showInfo && info.map(card)}
     </section>`}

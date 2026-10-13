@@ -82,7 +82,7 @@ export function Nav({ route, catalog, status, incidents, chatOpen, onChat, colla
         if (!shown.length) return null;
         const open = term || !closed.has(title);
         return html`<div class="nav-group">
-          <button class="nav-group-title" onClick=${() => toggle(title)}>${open ? "▾" : "▸"} ${title}</button>
+          <button class="nav-group-title" onClick=${() => toggle(title)}><span class="caret">${open ? "▾" : "▸"}</span> ${title}</button>
           ${open &&
           shown.map(
             (n) => html`<a class=${`nav-report${is("report", n) ? " active" : ""}`} href=${`#/report/${n}`}

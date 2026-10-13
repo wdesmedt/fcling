@@ -24,7 +24,7 @@ from ..fabric import Fabric
 from ..lens import Arg, LensError, lens
 from ..report import Column, Record
 from ..reports.instances import BgpVpnInstance
-from ..reports.services import Port, Service
+from ..reports.services import BgpSession, Port, Service
 from .common import Index
 
 
@@ -52,6 +52,7 @@ class ServiceView(Record):
     ports: tuple[Port, ...] = ()
     linked: tuple[str, ...] = ()
     bgp_peers: tuple[str, ...] = ()
+    bgp_sessions: tuple[BgpSession, ...] = ()
     virtual_es: tuple[str, ...] = ()
     #: MACs this node learned on its own ports, and over the overlay.
     macs_local: int = 0
@@ -228,6 +229,7 @@ def service(fabric: Fabric, name: str | None = None) -> Iterator[ServiceView]:
             ports=s.ports,
             linked=s.linked,
             bgp_peers=s.bgp_peers,
+            bgp_sessions=s.bgp_sessions,
             virtual_es=s.virtual_es,
             macs_local=local,
             macs_remote=remote,

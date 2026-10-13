@@ -20,3 +20,37 @@ def test_routing_policy_statements() -> None:
         "extended-community.operation=add extended-community.referenced-sets=soo-dc1"
     )
     assert by[("policy", "dcgw-dc-export-dc1", "default")]["result"] == "reject"
+
+
+def test_services_carry_each_bgp_peer_session_state() -> None:
+    from fcli.report import NodeState
+    from fcli.tree import Tree
+
+    tree = Tree()
+    tree.update(
+        "/",
+        {
+            "network-instance": [
+                {
+                    "name": "ipvrf-1",
+                    "type": "ip-vrf",
+                    "oper-state": "up",
+                    "protocols": {
+                        "bgp": {
+                            "neighbor": [
+                                {"peer-address": "10.9.0.1", "session-state": "established"},
+                                {"peer-address": "10.9.0.2", "session-state": "active"},
+                            ]
+                        }
+                    },
+                }
+            ]
+        },
+    )
+    state = NodeState(name="leaf1", tree=tree, models={}, labels={})
+    (vrf,) = [s for s in REGISTRY["services"].run(state) if s.name == "ipvrf-1"]
+    assert vrf.bgp_peers == ("10.9.0.1", "10.9.0.2")
+    assert [(s.peer, s.state) for s in vrf.bgp_sessions] == [
+        ("10.9.0.1", "established"),
+        ("10.9.0.2", "active"),
+    ]

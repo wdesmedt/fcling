@@ -45,6 +45,14 @@ class Port(_Value):
     peer_ni: str = ""
 
 
+class BgpSession(_Value):
+    """One BGP peer of a service, and whether its session is up."""
+
+    peer: str
+    #: ``established``, ``active``, ``idle``...: the session-state the node reports.
+    state: str = ""
+
+
 class Service(Record):
     key: ClassVar[tuple[str, ...]] = ("name",)
 
@@ -65,8 +73,9 @@ class Service(Record):
     ports: tuple[Port, ...] = ()
     #: ``ip-vrf``: the mac-vrfs behind its irbs. ``mac-vrf``: the ip-vrfs its irbs route into.
     linked: tuple[str, ...] = ()
-    #: ``ip-vrf``: its BGP sessions, ``peer (state)``.
+    #: ``ip-vrf``: BGP neighbor addresses (``peer-address``), one per session.
     bgp_peers: tuple[str, ...] = ()
+    bgp_sessions: tuple[BgpSession, ...] = ()
     #: ``ip-vrf``: the virtual ethernet-segments serving it, ``name (next-hop)``.
     virtual_es: tuple[str, ...] = ()
 
@@ -158,11 +167,14 @@ def services(node: NodeState) -> Iterator[Service]:
         for itf in inst.interfaces:
             member_of.setdefault(itf, []).append(inst.name)
     peers: dict[str, list[str]] = {}
+    sessions: dict[str, list[BgpSession]] = {}
     for m in tree.select("/network-instance/protocols/bgp/neighbor"):
-        state = str(m.value.get("session-state") or "")
-        peers.setdefault(str(m.keys.get("network-instance")), []).append(
-            f"{m.value.get('peer-address')} ({state})"
-        )
+        addr = str(m.value.get("peer-address") or "").strip()
+        if addr:
+            ni_name = str(m.keys.get("network-instance"))
+            peers.setdefault(ni_name, []).append(addr)
+            state = str(m.value.get("session-state") or "")
+            sessions.setdefault(ni_name, []).append(BgpSession(peer=addr, state=state))
     types = {inst.name: inst.type for inst in nis}
 
     for inst in nis:
@@ -218,6 +230,7 @@ def services(node: NodeState) -> Iterator[Service]:
             ports=tuple(ports),
             linked=tuple(sorted(linked)),
             bgp_peers=tuple(peers.get(inst.name, ()) if inst.type != "mac-vrf" else ()),
+            bgp_sessions=tuple(sessions.get(inst.name, ()) if inst.type != "mac-vrf" else ()),
             virtual_es=tuple(virtual.get(inst.name, ())),
         )
 
