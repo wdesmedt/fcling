@@ -14,12 +14,14 @@
     GET  /api/topology               the fabric as a graph: tiers, cables, clients, segments, health
     POST /api/chat                   ask the agent; its answer as server-sent events
          /mcp                        the agent's tools, for any MCP client (streamable HTTP)
+    GET  /                           the web UI: topology and incidents, over this same API
 
 Every answer comes from :class:`~fcli.service.EngineService`, which is also
 what the MCP tools and the agent use: they cannot see a different fabric.
 
 Bound to localhost unless told otherwise; ``token`` makes every call carry
-``Authorization: Bearer <token>`` (or ``?token=``).
+``Authorization: Bearer <token>`` (or ``?token=``). The UI's own files hold no
+data and need none: open it with ``/?token=...`` and it passes the token on.
 """
 
 from __future__ import annotations
@@ -31,13 +33,15 @@ import logging
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
-from starlette.routing import Route
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import views
@@ -54,6 +58,9 @@ QUEUE_SIZE = 10_000
 
 _LOCAL = ("127.0.0.1", "localhost", "::1")
 
+#: The web UI: static files, no build step.
+UI = Path(__file__).parent / "ui"
+
 
 class _Error(Exception):
     def __init__(self, status: int, message: str) -> None:
@@ -69,7 +76,7 @@ class _Auth:
         self.token = token
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
+        if scope["type"] == "http" and not _public(scope["path"]):
             request = Request(scope)
             given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
             given = given or request.query_params.get("token", "")
@@ -77,6 +84,11 @@ class _Auth:
                 await JSONResponse({"error": "unauthorized"}, status_code=401)(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+
+def _public(path: str) -> bool:
+    """The UI's own files: the same for everyone, and no answer about the fabric."""
+    return path == "/" or path.startswith("/ui/")
 
 
 def _sse(event: dict[str, Any]) -> str:
@@ -341,6 +353,8 @@ def create_app(
         Route("/api/lenses/{name}", handled(lens)),
         Route("/api/topology", handled(topology)),
         Route("/api/chat", handled(chat), methods=["POST"]),
+        Route("/", lambda request: FileResponse(UI / "index.html", headers={"cache-control": "no-cache"})),
+        Mount("/ui", StaticFiles(directory=UI)),
     ]
     if mcp_manager is not None:
         from mcp.server.streamable_http_manager import StreamableHTTPASGIApp

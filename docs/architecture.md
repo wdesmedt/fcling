@@ -26,6 +26,7 @@ inventory ──► collect (one-shot) ──┐
 | [service.py](../src/fcli/service.py) | the questions every surface asks; answered by the engine, a remote server, or the nodes one-shot |
 | [tools.py](../src/fcli/tools.py), [mcp.py](../src/fcli/mcp.py), [agent.py](../src/fcli/agent.py), [llm.py](../src/fcli/llm.py) | one tool layer, served over MCP and to the agent's providers |
 | [server.py](../src/fcli/server.py), [cli.py](../src/fcli/cli.py), [remote.py](../src/fcli/remote.py) | the surfaces |
+| [ui/](../src/fcli/ui/) | the web UI: ES modules over the HTTP API, with Preact and htm vendored as one file; no build step |
 
 Three principles hold throughout:
 
@@ -114,4 +115,4 @@ The tests leave every model provider unconfigured, whatever the shell has set.
 ## Not done yet
 
 - **Acknowledging incidents.**
-- **A web UI** over the HTTP API and its events.
+- **More of the UI:** lenses (`where`, `path` drawn on the topology), reports as tables, history, and the agent.

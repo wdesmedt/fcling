@@ -385,7 +385,7 @@ def serve(
     engine = Engine(fabric.nodes, reports, store, poll_interval=poll)
     err.print(
         f"{fabric.name}: {len(fabric.nodes)} nodes, {len(reports)} reports, history in {path}; "
-        f"http://{host}:{port}/api/status, MCP at http://{host}:{port}/mcp",
+        f"UI at http://{host}:{port}/, API at /api/status, MCP at /mcp",
         highlight=False,
     )
     try:

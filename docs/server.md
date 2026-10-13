@@ -4,6 +4,8 @@
 fcli -t lab.clab.yml serve                 # http://127.0.0.1:8765
 ```
 
+Open `http://127.0.0.1:8765/` for the web UI: the topology and the incidents, live ([ui.md](ui.md)).
+
 `fcli serve` keeps every report live. It streams each node over gNMI, re-runs a report only when something it reads changes, and records every change to its records in a history. The CLI, MCP clients and the agent then answer from what it already holds, without asking the nodes.
 
 | Option | Default | |
@@ -61,6 +63,7 @@ Every endpoint takes `inv=KEY=GLOB` and `node=NAME`, both repeatable, to narrow 
 | `GET/POST /api/baselines`, `DELETE /api/baselines/{name}` | named points in time |
 | `GET /api/events` | server-sent events (below) |
 | `POST /api/chat` | ask the agent ([ai.md](ai.md)) |
+| `GET /` | the web UI ([ui.md](ui.md)); its files under `/ui/` need no token |
 | `/mcp` | the tools for MCP clients ([ai.md](ai.md)) |
 
 Errors are JSON, `{"error": "..."}`, with status 400 or 404. An `at` before the history starts is a 400 that says when it starts.

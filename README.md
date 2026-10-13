@@ -65,6 +65,7 @@ Reports: `sys-info`, `config-commits`, `lldp`, `subif`, `lag`, `ifstats`, `ni`, 
 |---|---|
 | [Installation and inventory](docs/installation.md) | installing, containerlab and static inventories, selecting nodes, TLS |
 | [Reports](docs/cli.md) | every report, filters, output formats |
+| [The web UI](docs/ui.md) | the topology and incidents in a browser, live or at an instant |
 | [The engine](docs/server.md) | `fcli serve`: how it streams, the HTTP API and its events, security |
 | [History](docs/history.md) | what is kept, `--at`, commit attribution, baselines and drift |
 | [Lenses and topology](docs/lenses.md) | `where`, `path`, `service`, `endpoints`, `topology`, adding a lens |
@@ -145,3 +146,4 @@ The gNMI stubs are generated from the openconfig protos (`make proto`) and commi
 4. ~~Checks, incident correlation, timeline and baselines~~. Findings live in the engine and are kept as history. Incidents carry "since". `--at` works for findings and incidents, baselines and drift work through the store, and history is attributed to commits. On both labs the engine's findings match a one-shot run.
 5. ~~MCP served from the engine, and the in-app agent on the same tools~~: `/mcp`, `fcli mcp`, `/api/chat` and `fcli ask`. All of them use the same tools over one Service, with Claude, OpenAI or Grok as the model.
 6. ~~Lenses and topology~~: `where`, `path`, `service`, `endpoints` and `topology`, from the nodes, the engine or the history. They are served over `/api/lenses` and `/api/topology`, and five more tools use them. `services`, `bridge-domains` and `routers` are typed reports. `endpoints` became a lens, because placing a host needs every node's tables.
+7. Web UI, served by `fcli serve` with no build step. ~~Topology and incidents~~, live or at an instant. Next: lenses, reports, history and the agent.

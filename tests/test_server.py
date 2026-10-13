@@ -238,3 +238,24 @@ def test_lenses_and_topology(client: TestClient) -> None:
     assert missing.status_code == 400 and "needs address" in missing.json()["error"]
     graph = client.get("/api/topology").json()
     assert [n["name"] for n in graph["nodes"]] == ["leaf1"]
+
+
+def test_the_ui_is_served_and_needs_no_token(target: FakeTarget, tmp_path: Path) -> None:
+    client, store = _client(target, tmp_path, token="s3cret")
+    with client:
+        page = client.get("/")
+        assert page.status_code == 200 and '<script type="module" src="ui/app.js">' in page.text
+        for asset in (
+            "app.js",
+            "api.js",
+            "topology.js",
+            "incidents.js",
+            "style.css",
+            "vendor/preact-htm.module.js",
+        ):
+            assert client.get(f"/ui/{asset}").status_code == 200, asset
+        assert client.get("/ui/nope.js").status_code == 404
+        # The data still needs the token.
+        assert client.get("/api/topology").status_code == 401
+        assert client.get("/api/topology", params={"token": "s3cret"}).status_code == 200
+    store.close()
