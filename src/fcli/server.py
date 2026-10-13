@@ -5,7 +5,8 @@
     GET  /api/reports/{name}         its records: live, at an instant (``at``), or
                                      collected on the spot for one not streamed
     GET  /api/checks                 what is wrong: findings, live or ``at`` an instant
-    GET  /api/incidents              the findings grouped by root cause
+    GET  /api/incidents              the findings grouped by root cause, each saying if acknowledged
+    GET|POST|DELETE /api/acks        acknowledge an incident ({incident, note}), or no longer (?incident=)
     GET  /api/history                the kept changes, oldest first, with their likely cause
     GET  /api/drift                  what differs between a baseline (or time) and now
     GET|POST /api/baselines          named instants to compare against
@@ -37,6 +38,7 @@ import sys
 import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import render, views
+from .acks import AckStore
 from .engine import Engine
 from .inventory import Inventory
 from .service import EngineService, ServiceError, select_nodes
@@ -220,9 +223,13 @@ def create_app(
     host: str = "127.0.0.1",
     agent_client: Any = None,
     rpc_timeout: float = 30.0,
+    acks: AckStore | None = None,
 ) -> Starlette:
-    """The app serving *engine*, which it runs for as long as it is up when *run_engine*."""
-    service = EngineService(engine, fabric, rpc_timeout=rpc_timeout)
+    """The app serving *engine*, which it runs for as long as it is up when *run_engine*.
+
+    *acks* keeps the acknowledged incidents; in memory, for as long as the app runs, when not given.
+    """
+    service = EngineService(engine, fabric, rpc_timeout=rpc_timeout, acks=acks)
     query_list = lambda request, name: request.query_params.getlist(name)  # noqa: E731
     # The open event streams: told to end when the server stops, or it would wait on them for ever.
     streams: set[asyncio.Queue[dict[str, Any] | None]] = set()
@@ -287,6 +294,22 @@ def create_app(
         found = await service.incidents(request.query_params.get("at"))
         return [i for i in found if nodes is None or set(i["nodes"]) & nodes]
 
+    async def acknowledgements(request: Request) -> Any:
+        """GET: what is acknowledged. POST ``{incident, note}``: acknowledge it.
+        DELETE ``?incident=``: no longer."""
+        if request.method == "POST":
+            body = await request.json()
+            incident = str(body.get("incident") or "").strip()
+            if not incident:
+                raise _Error(400, 'say which incident: {"incident": <id>}')
+            return await service.acknowledge(incident, str(body.get("note") or ""))
+        if request.method == "DELETE":
+            incident = request.query_params.get("incident", "").strip()
+            if not incident:
+                raise _Error(400, "say which incident: ?incident=<id>")
+            return await service.unacknowledge(incident)
+        return [asdict(a) for a in service.acks.all()]
+
     async def history(request: Request) -> Any:
         query = request.query_params
         args: dict[str, Any] = {
@@ -334,6 +357,8 @@ def create_app(
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(QUEUE_SIZE)
 
         def wanted(event: dict[str, Any]) -> bool:
+            if event["type"] == "acks":
+                return True
             if event["type"] == "node":
                 return not nodes_wanted or event["name"] in nodes_wanted
             if reports_wanted and event["report"] not in reports_wanted:
@@ -482,6 +507,7 @@ def create_app(
         Route("/api/reports/{name}", handled(report_records)),
         Route("/api/checks", handled(checks)),
         Route("/api/incidents", handled(incidents)),
+        Route("/api/acks", handled(acknowledgements), methods=["GET", "POST", "DELETE"]),
         Route("/api/history", handled(history)),
         Route("/api/drift", handled(drift)),
         Route("/api/baselines", handled(baselines), methods=["GET", "POST"]),

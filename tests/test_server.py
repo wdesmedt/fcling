@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
+from fcli.acks import AckStore
 from fcli.engine import Engine
 from fcli.gnmi.client import Tls
 from fcli.inventory import Inventory, Node
@@ -35,6 +36,7 @@ def _client(
     token: str | None = None,
     checks: bool = False,
     agent_client: object = None,
+    acks: AckStore | None = None,
 ) -> tuple[TestClient, AsyncStore]:
     node = Node(
         "leaf1", "127.0.0.1", target.port, USERNAME, PASSWORD, Tls(insecure=True), labels={"role": "leaf"}
@@ -42,7 +44,7 @@ def _client(
     fabric = Inventory("lab", (node,))
     store = AsyncStore(tmp_path / "h.db")
     engine = Engine(fabric.nodes, [REGISTRY["bgp-peers"]], store, settle=0.01, checks=checks)
-    return TestClient(create_app(engine, fabric, token, agent_client=agent_client)), store
+    return TestClient(create_app(engine, fabric, token, agent_client=agent_client, acks=acks)), store
 
 
 @pytest.fixture
@@ -325,3 +327,67 @@ def _answers(remote: Remote) -> bool:
         return len(remote.get("/api/reports/bgp-peers")["records"]) == 2
     except Exception:
         return False
+
+
+def test_acknowledged_incidents_leave_the_counts_and_end_with_their_finding(
+    target: FakeTarget, tmp_path: Path
+) -> None:
+    kept = tmp_path / "h.acks.json"
+    client, store = _client(target, tmp_path, checks=True, acks=AckStore(kept))
+    with client:
+        _until(lambda: client.get("/api/incidents").json())
+        (incident,) = client.get("/api/incidents").json()
+        assert incident["acknowledged"] is False and incident["ack"] is None
+        assert (
+            client.get("/api/status").json()["incidents"]["warnings"]
+            + client.get("/api/status").json()["incidents"]["errors"]
+            == 1
+        )
+
+        acked = client.post("/api/acks", json={"incident": incident["id"], "note": "ticket 42"}).json()
+        assert acked["acknowledged"] is True and acked["ack"]["note"] == "ticket 42"
+        counts = client.get("/api/status").json()["incidents"]
+        assert (counts["errors"], counts["warnings"], counts["acknowledged"]) == (0, 0, 1)
+        (ack,) = client.get("/api/acks").json()
+        assert (ack["check"], ack["subject"], ack["incident_id"]) == (
+            "bgp_down",
+            "default/10.0.0.2",
+            incident["id"],
+        )
+        # Kept on disk: a server started again over the same file has it.
+        assert [a.subject for a in AckStore(kept).all()] == ["default/10.0.0.2"]
+
+        assert client.delete("/api/acks", params={"incident": incident["id"]}).json()["acknowledged"] is False
+        assert client.get("/api/acks").json() == []
+        assert client.post("/api/acks", json={"incident": "nope"}).status_code == 400
+        assert client.post("/api/acks", json={}).status_code == 400
+
+        # Acknowledged again, then the session comes up: the acknowledgement ends with the finding.
+        client.post("/api/acks", json={"incident": incident["id"]})
+        target.push({PEER.format("10.0.0.2") + "/session-state": "established"})
+        _until(lambda: client.get("/api/acks").json() == [])
+        assert AckStore(kept).all() == []
+    store.close()
+
+
+def test_an_acknowledgement_whose_finding_cleared_while_stopped_ends_on_restart(
+    target: FakeTarget, tmp_path: Path
+) -> None:
+    kept = tmp_path / "h.acks.json"
+    client, store = _client(target, tmp_path, checks=True, acks=AckStore(kept))
+    with client:
+        _until(lambda: client.get("/api/incidents").json())
+        (incident,) = client.get("/api/incidents").json()
+        client.post("/api/acks", json={"incident": incident["id"]})
+    store.close()
+    assert len(AckStore(kept).all()) == 1
+
+    # Fixed while nobody watched: the node now says so, the stored findings still have it.
+    fixed = json.loads(json.dumps(DATA).replace('"active"', '"established"'))
+    with FakeTarget(fixed) as again:
+        client, store = _client(again, tmp_path, checks=True, acks=AckStore(kept))
+        with client:
+            _until(lambda: client.get("/api/acks").json() == [])
+            assert client.get("/api/incidents").json() == []
+        store.close()
+    assert AckStore(kept).all() == []

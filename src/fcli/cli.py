@@ -387,6 +387,11 @@ def bgp_rib_command(
 @click.option(
     "--api-token", envvar="FCLI_API_TOKEN", help="require this bearer token [default: none on localhost]"
 )
+@click.option(
+    "--persist-acks",
+    is_flag=True,
+    help="keep acknowledged incidents across restarts, in a file next to the history",
+)
 @click.pass_obj
 def serve(
     settings: Settings,
@@ -396,11 +401,14 @@ def serve(
     poll: float,
     names: tuple[str, ...],
     api_token: str | None,
+    persist_acks: bool,
 ) -> None:
     """Stream the fabric, keep its history, and serve both over HTTP"""
     try:
         import uvicorn  # noqa: F401
 
+        from .acks import AckStore
+        from .acks import path_for as acks_path
         from .engine import Engine
         from .server import create_app, run
         from .store import AsyncStore
@@ -423,14 +431,16 @@ def serve(
     path = db or default_path(fabric.name)
     store = AsyncStore(path)
     engine = Engine(fabric.nodes, reports, store, poll_interval=poll)
+    acks = AckStore(acks_path(path) if persist_acks else None)
     err.print(
-        f"{fabric.name}: {len(fabric.nodes)} nodes, {len(reports)} reports, history in {path}; "
-        f"UI at http://{host}:{port}/, API at /api/status, MCP at /mcp",
+        f"{fabric.name}: {len(fabric.nodes)} nodes, {len(reports)} reports, history in {path}"
+        + (f", acknowledgements in {acks.path} ({len(acks.all())} kept)" if acks.path else "")
+        + f"; UI at http://{host}:{port}/, API at /api/status, MCP at /mcp",
         highlight=False,
     )
     try:
         run(
-            create_app(engine, fabric, api_token, host=host, rpc_timeout=settings.timeout),
+            create_app(engine, fabric, api_token, host=host, rpc_timeout=settings.timeout, acks=acks),
             host,
             port,
         )

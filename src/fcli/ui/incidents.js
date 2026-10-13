@@ -1,7 +1,7 @@
 // Incidents: what is wrong, by root cause, worst first; and what changed just before each.
 
 import { html, useEffect, useState } from "./vendor/preact-htm.module.js";
-import { SEVERITIES, ago, clock, get } from "./api.js";
+import { SEVERITIES, ago, clock, get, send } from "./api.js";
 
 /** How far before an incident started to look for what changed. */
 const LOOKBACK = 15 * 60;
@@ -149,18 +149,44 @@ function Before({ incident, started }) {
 /** Rows of an incident's other findings shown before "show more". */
 const RELATED = 8;
 
-function Incident({ incident, open, onToggle, onNode, at, started }) {
+/** Ack or Unack an open incident; acknowledgements are about now, so not at an instant in the past. */
+function AckButton({ incident, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const acked = incident.acknowledged;
+  const act = async (e) => {
+    e.stopPropagation();
+    setBusy(true);
+    setError("");
+    try {
+      if (acked) await send("DELETE", "/api/acks", { params: { incident: incident.id } });
+      else await send("POST", "/api/acks", { body: { incident: incident.id } });
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<button class=${`small ack${acked ? " acked" : ""}`} disabled=${busy} onClick=${act}
+                      title=${error || (acked ? "Show it as open again" : "Known: take it out of the counts until a finding changes or it clears")}>
+    ${acked ? "Unack" : "Ack"}</button>`;
+}
+
+function Incident({ incident, open, onToggle, onNode, at, started, onChanged }) {
   const findings = [incident.root, ...incident.related];
   const [allRelated, setAllRelated] = useState(false);
   const related = allRelated ? incident.related : incident.related.slice(0, RELATED);
-  return html`<article class=${`incident sev-${incident.severity}${open ? " open" : ""}`}>
+  return html`<article class=${`incident sev-${incident.severity}${open ? " open" : ""}${incident.acknowledged ? " acknowledged" : ""}`}>
     <header onClick=${onToggle}>
       <span class=${`pill ${incident.severity}`}>${incident.severity}</span>
       <h3>${incident.title}</h3>
       <span class="meta">
         ${incident.kind} · ${findings.length} finding${findings.length > 1 ? "s" : ""}
         ${incident.first_seen && html` · since ${ago(incident.first_seen)}`}
+        ${incident.acknowledged && incident.ack && html` · acknowledged ${ago(incident.ack.at)}`}
       </span>
+      ${!at && html`<${AckButton} incident=${incident} onChanged=${onChanged} />`}
       <span class="caret">${open ? "▾" : "▸"}</span>
     </header>
     <div class="nodes">
@@ -191,24 +217,40 @@ function Incident({ incident, open, onToggle, onNode, at, started }) {
   </article>`;
 }
 
-export function Incidents({ incidents, at, onNode, started }) {
+export function Incidents({ incidents, at, onNode, started, onChanged }) {
   const [open, setOpen] = useState(() => new Set());
   const [showInfo, setShowInfo] = useState(false);
+  const [showAcked, setShowAcked] = useState(false);
+  // A count clicked shows only its incidents; clicked again, all of them.
+  const [only, setOnly] = useState("");
   const toggle = (id) => {
     const next = new Set(open);
     next.has(id) ? next.delete(id) : next.add(id);
     setOpen(next);
   };
-  const counts = Object.fromEntries(SEVERITIES.map((s) => [s, incidents.filter((i) => i.severity === s).length]));
-  const faults = incidents.filter((i) => i.severity !== "info");
-  const info = incidents.filter((i) => i.severity === "info");
-  const card = (i) => html`<${Incident} incident=${i} open=${open.has(i.id)} onToggle=${() => toggle(i.id)}
-                                        onNode=${onNode} at=${at} started=${started} />`;
+  // The acknowledged ones are known: out of the counts and the list, kept together below.
+  const acked = incidents.filter((i) => i.acknowledged);
+  const unacked = incidents.filter((i) => !i.acknowledged);
+  const counts = Object.fromEntries(SEVERITIES.map((s) => [s, unacked.filter((i) => i.severity === s).length]));
+  const faults = unacked.filter((i) => i.severity !== "info");
+  const info = unacked.filter((i) => i.severity === "info");
+  const card = (i) => html`<${Incident} key=${i.id} incident=${i} open=${open.has(i.id)} onToggle=${() => toggle(i.id)}
+                                        onNode=${onNode} at=${at} started=${started} onChanged=${onChanged} />`;
+  const filter = (name, n, label = name) => html`<button
+      class=${`count ${name}${n ? "" : " zero"}${only === name ? " on" : ""}`} aria-pressed=${only === name}
+      title=${only === name ? "Show every incident" : `Show only the ${label} incidents`}
+      onClick=${() => setOnly(only === name ? "" : name)}><b>${n}</b> ${label}</button>`;
+  const picked = only === "acknowledged" ? acked : unacked.filter((i) => i.severity === only);
   return html`<div class="incidents">
     <div class="summary">
-      ${SEVERITIES.map((s) => html`<span class=${`count ${s}${counts[s] ? "" : " zero"}`}><b>${counts[s]}</b> ${s}</span>`)}
+      ${SEVERITIES.map((s) => filter(s, counts[s]))}
+      ${(acked.length > 0 || only === "acknowledged") && filter("acknowledged", acked.length)}
     </div>
-    ${faults.length
+    ${only
+      ? picked.length
+        ? picked.map(card)
+        : html`<p class="muted">No ${only} incidents${at ? " at that time" : ""}.</p>`
+      : html`${faults.length
       ? faults.map(card)
       : html`<div class="all-clear"><b>Nothing wrong.</b> No errors or warnings${at ? " at that time" : ""}.</div>`}
     ${info.length > 0 &&
@@ -218,5 +260,12 @@ export function Incidents({ incidents, at, onNode, started }) {
       </button>
       ${showInfo && info.map(card)}
     </section>`}
+    ${acked.length > 0 &&
+    html`<section class="info-section">
+      <button class="link-button" onClick=${() => setShowAcked(!showAcked)}>
+        <span class="caret">${showAcked ? "▾" : "▸"}</span> Acknowledged (${acked.length}): known, until a finding changes or clears
+      </button>
+      ${showAcked && acked.map(card)}
+    </section>`}`}
   </div>`;
 }

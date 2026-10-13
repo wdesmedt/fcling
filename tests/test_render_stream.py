@@ -15,6 +15,7 @@ def test_rows_for_records_formats_cells() -> None:
 def test_partials_carry_only_new_rows(monkeypatch) -> None:
     """Resending the table so far made a 61k-route RIB a gigabyte of events."""
     import asyncio
+    from types import SimpleNamespace
 
     from fcli import service
     from fcli.collect import NodeResult
@@ -37,7 +38,8 @@ def test_partials_carry_only_new_rows(monkeypatch) -> None:
     async def emit(event: dict) -> None:
         events.append(event["answer"])
 
-    svc = service.EngineService(None, Inventory(name="lab", nodes=(node,)))
+    engine = SimpleNamespace(listen=lambda listener: lambda: None)
+    svc = service.EngineService(engine, Inventory(name="lab", nodes=(node,)))
     answer = asyncio.run(svc._collect_report_streaming(report, {}, ["leaf1"], emit))
     assert [(len(e["rows"]), e["append"]) for e in events] == [(0, False), (2, True), (3, True)]
     assert [r[2] for e in events for r in e["rows"]] == [p.peer for p in peers]

@@ -491,6 +491,10 @@ class Engine:
         self._listeners.add(listener)
         return lambda: self._listeners.discard(listener)
 
+    def publish(self, event: dict[str, Any]) -> None:
+        """Tell every listener *event*: what the engine does not make itself, such as an acknowledgement."""
+        self._publish(event)
+
     def _publish(self, event: dict[str, Any]) -> None:
         for listener in list(self._listeners):
             try:

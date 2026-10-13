@@ -15,6 +15,9 @@ Open `http://127.0.0.1:8765/` for the web UI: topology, incidents, history, lens
 | `--poll SECONDS` | 10 | how often counters are read |
 | `-r REPORT` | all reports | stream only these reports; others are collected one-shot when asked |
 | `--api-token` | none on localhost | require a bearer token (`FCLI_API_TOKEN`) |
+| `--persist-acks` | off | keep acknowledged incidents across restarts, in `<db>.acks.json` beside the history |
+
+**Acknowledging** an incident says it is known: it leaves the counts and moves to its own section in the UI, still shown. It is kept per finding, so a new finding joining the incident brings it back, and the acknowledgement ends when its finding clears (the same fault later is an alarm again). Without `--persist-acks` acknowledgements last until the server stops; with it, one whose finding cleared while the server was down ends on the first checks after the restart.
 
 ^C, SIGTERM or SIGHUP stop it within a second, ending any open event streams and closing the history. Requests still running (an agent's answer, say) get 5 seconds to finish. A second signal ends the process within 3 seconds, whatever is still open.
 
@@ -56,7 +59,8 @@ Every endpoint takes `inv=KEY=GLOB` and `node=NAME`, both repeatable, to narrow 
 | `GET /api/reports` | every report: columns, parameters, key and volatile fields, record JSON schema |
 | `GET /api/reports/{name}` | its records. Live; `?at=TIME` from history; with report parameters (`?address=10.0.0.1`), collected on the spot. `source` says which of the three it was. `?table=1` adds `columns` and `rows`: the CLI's table, as text. |
 | `GET /api/checks` | findings, with when each was raised (`?at=`, `?check=`) |
-| `GET /api/incidents` | findings grouped by root cause (`?at=`) |
+| `GET /api/incidents` | findings grouped by root cause (`?at=`); live, each says whether it is `acknowledged` |
+| `GET/POST/DELETE /api/acks` | the acknowledged findings; `POST {"incident": id, "note": ""}` acknowledges an open incident, `DELETE ?incident=id` takes it off |
 | `GET /api/history` | changes, oldest first, each with its likely cause (`since`, `until`, `report`, `limit`, `after`) |
 | `GET /api/lenses` | every lens, with its arguments, columns and record JSON schema |
 | `GET /api/lenses/{name}` | a lens's records: its arguments as query parameters (`?address=10.1.3.13`), `?at=` from history ([lenses.md](lenses.md)); `?table=1` as for reports |

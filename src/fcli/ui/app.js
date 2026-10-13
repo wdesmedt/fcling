@@ -301,6 +301,7 @@ function App() {
                                                     onNode=${(n) => select({ type: "node", id: n })} /></main>`;
   } else if (route.view === "incidents") {
     page = html`<main class="page"><${Incidents} incidents=${data.incidents} at=${at} started=${status?.started}
+                                                 onChanged=${() => load()}
                                                  onNode=${(n) => select({ type: "node", id: n })} /></main>`;
   } else if (route.view === "history") {
     page = html`<main class="page wide"><${HistoryView} ...${shared} catalog=${catalog} /></main>`;

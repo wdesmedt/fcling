@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from typing import Any, Protocol
 
 from . import render, views
+from .acks import AckStore, finding_key
 from .checks import Finding, required, run_checks
 from .collect import collect
 from .delta import record_key
@@ -220,12 +221,46 @@ def _collect_rpc_timeout(spec: Any, base: float) -> float:
     return base
 
 
+def _with_acks(incident: dict[str, Any], acks: AckStore) -> dict[str, Any]:
+    """*incident* saying whether it is acknowledged: every one of its findings is."""
+    found = [acks.get(finding_key(f)) for f in [incident["root"], *incident["related"]]]
+    known = [a for a in found if a is not None]
+    latest = max(known, key=lambda a: a.at) if known else None
+    return {
+        **incident,
+        "acknowledged": bool(found) and len(known) == len(found),
+        "ack": {"at": latest.at, "note": latest.note} if latest else None,
+    }
+
+
+def _incident_counts(found: Sequence[dict[str, Any]]) -> dict[str, int]:
+    """Open incidents by severity, the acknowledged ones apart: they no longer ask to be looked at."""
+    open_ = [i for i in found if not i.get("acknowledged")]
+    return {
+        "errors": sum(1 for i in open_ if i["severity"] == "error"),
+        "warnings": sum(1 for i in open_ if i["severity"] == "warning"),
+        "info": sum(1 for i in open_ if i["severity"] == "info"),
+        "acknowledged": len(found) - len(open_),
+    }
+
+
 class EngineService:
-    def __init__(self, engine: Any, fabric: Inventory, rpc_timeout: float = 30.0) -> None:
+    def __init__(
+        self, engine: Any, fabric: Inventory, rpc_timeout: float = 30.0, acks: AckStore | None = None
+    ) -> None:
         self.engine = engine
         self.fabric = fabric
         self.rpc_timeout = rpc_timeout
         self._collect_slots = asyncio.Semaphore(2)
+        self.acks = acks if acks is not None else AckStore()
+        # An acknowledgement ends with its finding: the same fault back later is an alarm again.
+        # After a restart the first checks run against the stored ones, so what cleared meanwhile ends too.
+        engine.listen(self._expire_acks)
+
+    def _expire_acks(self, event: dict[str, Any]) -> None:
+        if event.get("type") == "change" and event.get("report") == "checks" and event.get("op") == "remove":
+            if event.get("before") and self.acks.unacknowledge([finding_key(event["before"])]):
+                self.engine.publish({"type": "acks"})
 
     def _store(self) -> Any:
         if self.engine.store is None:
@@ -247,11 +282,7 @@ class EngineService:
             "started": self.engine.started,
             "nodes": self.engine.status(),
             "streamed": sorted(self.engine.plan.reports),
-            "incidents": {
-                "errors": sum(1 for i in found if i["severity"] == "error"),
-                "warnings": sum(1 for i in found if i["severity"] == "warning"),
-                "info": sum(1 for i in found if i["severity"] == "info"),
-            },
+            "incidents": _incident_counts(found),
         }
 
     async def reports(self) -> list[dict[str, Any]]:
@@ -417,7 +448,31 @@ class EngineService:
 
     async def incidents(self, at: str | None = None) -> list[dict[str, Any]]:
         findings, where, raised = await self._findings(at)
-        return [i.as_dict() for i in correlate(findings, where, raised)]
+        found = [i.as_dict() for i in correlate(findings, where, raised)]
+        # Acknowledgements are about now: an incident looked at in the past is shown as it was.
+        return found if at else [_with_acks(i, self.acks) for i in found]
+
+    async def _incident(self, incident_id: str) -> dict[str, Any]:
+        for incident in await self.incidents():
+            if incident["id"] == incident_id:
+                return incident
+        raise ServiceError(f"no incident {incident_id!r} open now")
+
+    async def acknowledge(self, incident_id: str, note: str = "") -> dict[str, Any]:
+        """Acknowledge an open incident: each of its findings, as they are now."""
+        incident = await self._incident(incident_id)
+        findings = [incident["root"], *incident["related"]]
+        self.acks.acknowledge(findings, note, incident_id=incident_id, incident=incident["title"])
+        self.engine.publish({"type": "acks"})
+        return await self._incident(incident_id)
+
+    async def unacknowledge(self, incident_id: str) -> dict[str, Any]:
+        """Take the acknowledgement off an incident: its findings now, and any acknowledged as part of it."""
+        incident = await self._incident(incident_id)
+        keys = {finding_key(f) for f in [incident["root"], *incident["related"]]}
+        self.acks.unacknowledge(keys | self.acks.of_incident(incident_id))
+        self.engine.publish({"type": "acks"})
+        return await self._incident(incident_id)
 
     async def history(
         self,

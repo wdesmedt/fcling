@@ -43,7 +43,7 @@ Everything else dims, so you can see what the selection touches. Drag to pan, sc
 
 ## Incidents
 
-The incidents tab lists the open incidents worst first, as `fcling incidents` does. Open one to see its explanation, its root finding and its consequences, and **what changed just before**. That is the history of the incident's nodes in the 15 minutes before it started, with the configuration commit each change is attributed to. Info incidents are folded away at the bottom, and a node chip opens that node on the topology.
+The incidents tab lists the open incidents worst first, as `fcling incidents` does. Open one to see its explanation, its root finding and its consequences, and **what changed just before**. That is the history of the incident's nodes in the 15 minutes before it started, with the configuration commit each change is attributed to. Info incidents are folded away at the bottom, and a node chip opens that node on the topology. **Ack** marks an incident as known: it leaves the counts (here, in the navigation and on the Nodes page) and folds into an Acknowledged section, until a finding joins it or it clears; **Unack** brings it back. Acknowledgements are shared by everyone using the server, and survive a restart with `fcling serve --persist-acks`.
 
 ## History
 

@@ -789,6 +789,19 @@ main.page {
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.summary .count:hover {
+  border-color: var(--muted);
+}
+
+/* The one filtering the list. */
+.summary .count.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
 }
 
 .summary .count b {
@@ -823,6 +836,25 @@ main.page {
 
 .incident.sev-warning {
   border-left-color: var(--warning);
+}
+
+/* Known: still there, no longer asking to be looked at. */
+.incident.acknowledged {
+  border-left-color: var(--line);
+  box-shadow: none;
+}
+
+.incident.acknowledged h3,
+.incident.acknowledged .pill {
+  opacity: 0.65;
+}
+
+.incident .ack.acked {
+  color: var(--muted);
+}
+
+.summary .count.acknowledged {
+  color: var(--muted);
 }
 
 .incident header {

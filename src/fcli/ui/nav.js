@@ -38,8 +38,10 @@ function groups(catalog) {
 export function Nav({ route, catalog, status, incidents, chatOpen, onChat, collapsed }) {
   const [find, setFind] = useState("");
   const [closed, setClosed] = useState(() => new Set());
-  const errors = incidents.filter((i) => i.severity === "error").length;
-  const warnings = incidents.filter((i) => i.severity === "warning").length;
+  // Acknowledged incidents are known: they no longer ask to be looked at.
+  const unacked = incidents.filter((i) => !i.acknowledged);
+  const errors = unacked.filter((i) => i.severity === "error").length;
+  const warnings = unacked.filter((i) => i.severity === "warning").length;
   const down = (status?.nodes ?? []).filter((n) => n.status !== "live").length;
   const is = (view, name) => route.view === view && (name === undefined || route.name === name);
   const toggle = (title) => {

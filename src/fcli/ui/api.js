@@ -84,12 +84,32 @@ export async function get(path, params = {}) {
   return body;
 }
 
+/** POST or DELETE to the API: *body* as JSON when given; the answer, or an ApiError. */
+export async function send(method, path, { params = {}, body } = {}) {
+  const response = await fetch(url(path, params), {
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let answer = null;
+  try {
+    answer = await response.json();
+  } catch {
+    // An error without a JSON body: the status line says enough.
+  }
+  if (!response.ok) throw new ApiError(response.status, answer?.error || response.statusText);
+  return answer;
+}
+
 /** Follow the server's events; the browser reconnects, and the server replays what was missed. */
 export function follow(reports, onEvent, onConnection) {
   const source = new EventSource(url("/api/events", { report: reports, token }));
   source.onopen = () => onConnection("live");
   source.onerror = () => onConnection(source.readyState === EventSource.CLOSED ? "closed" : "reconnecting");
-  for (const type of ["status", "node", "change"]) {
+  for (const type of ["status", "node", "change", "acks"]) {
     source.addEventListener(type, (e) => onEvent(type, JSON.parse(e.data)));
   }
   return () => source.close();
