@@ -1,4 +1,4 @@
-// fcli's web UI: the shell - routing, the header, the navigation panel, the agent - around the views.
+// fcling's web UI: the shell - routing, the header, the navigation panel, the agent - around the views.
 
 import { html, render, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
 import { follow, get, hashQuery } from "./api.js";
@@ -89,12 +89,54 @@ function TimeControl({ at, onAt }) {
   </form>`;
 }
 
+/** Whether there is a screen to go back or forward to; where the browser cannot say, there is. */
+function useHistorySteps() {
+  const nav = globalThis.navigation;
+  const read = () => ({ back: nav?.canGoBack ?? true, forward: nav?.canGoForward ?? true });
+  const [steps, setSteps] = useState(read);
+  useEffect(() => {
+    if (!nav) return;
+    const changed = () => setSteps(read());
+    nav.addEventListener("currententrychange", changed);
+    return () => nav.removeEventListener("currententrychange", changed);
+  }, []);
+  return steps;
+}
+
+/** Two spines over three leaves: the logo, as the favicon has it. */
+const Mark = () => html`<svg class="mark-logo" viewBox="0 0 24 24" aria-hidden="true">
+  <defs>
+    <linearGradient id="fcling-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb" /><stop offset="1" stop-color="#06b6d4" />
+    </linearGradient>
+  </defs>
+  <rect width="24" height="24" rx="6" fill="url(#fcling-mark)" />
+  <path d="M8.5 7.5 5.5 16.5M8.5 7.5 12 16.5M8.5 7.5 18.5 16.5M15.5 7.5 5.5 16.5M15.5 7.5 12 16.5M15.5 7.5 18.5 16.5"
+        stroke="#fff" stroke-opacity="0.55" stroke-width="1.1" />
+  <g fill="#fff"><circle cx="8.5" cy="7.5" r="2.1" /><circle cx="15.5" cy="7.5" r="2.1" />
+    <circle cx="5.5" cy="16.5" r="1.9" /><circle cx="12" cy="16.5" r="1.9" /><circle cx="18.5" cy="16.5" r="1.9" /></g>
+</svg>`;
+
 function Header({ status, connection, at, onAt, toggleTheme, onMenu, onChat, chatOpen }) {
   const nodes = status?.nodes ?? [];
+  useEffect(() => {
+    document.title = status?.fabric ? `fcling · ${status.fabric}` : "fcling";
+  }, [status?.fabric]);
   const down = nodes.filter((n) => n.status !== "live");
+  const steps = useHistorySteps();
   return html`<header class="top">
     <button class="icon menu" onClick=${onMenu} title="Show or hide the navigation" aria-label="Navigation">☰</button>
-    <a class="brand" href="#/topology"><span class="logo">fcli</span><span class="fabric">${status?.fabric ?? ""}</span></a>
+    <span class="history-steps">
+      <button class="icon" onClick=${() => history.back()} disabled=${!steps.back}
+              title="Back to the previous screen (Alt+←)" aria-label="Back">←</button>
+      <button class="icon" onClick=${() => history.forward()} disabled=${!steps.forward}
+              title="Forward to the next screen (Alt+→)" aria-label="Forward">→</button>
+    </span>
+    <a class="brand" href="#/topology" title="fcling: the fabric, live">
+      <${Mark} />
+      <span class="logo">fc<span class="logo-ling">ling</span></span>
+      ${status?.fabric && html`<span class="fabric">${status.fabric}</span>`}
+    </a>
     <div class="spacer"></div>
     <span class=${`nodes-state${down.length ? " bad" : ""}`}
           title=${down.map((n) => `${n.name}: ${n.status}${n.error ? ` (${n.error})` : ""}`).join("\n")}>

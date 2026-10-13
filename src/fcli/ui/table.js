@@ -1,6 +1,6 @@
 // A table of rows as the server renders them: filtered, sorted, and capped so a big RIB stays quick.
 
-import { html, useEffect, useMemo, useState } from "./vendor/preact-htm.module.js";
+import { html, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
 import { natural } from "./api.js";
 
 const PAGE = 500;
@@ -35,6 +35,23 @@ export function cellTest(expression) {
     return (cell) => String(cell).toLowerCase() === exact;
   }
   return (cell) => String(cell).toLowerCase().includes(text);
+}
+
+const signature = (row) => row.join("\u0001");
+
+/**
+ * The rows that are new or changed since the rows before, when `flash` - what the rows are
+ * of - is the same: a live update, not another report, time or question.
+ */
+function useFresh(rows, flash) {
+  const before = useRef({ flash: undefined, seen: null });
+  return useMemo(() => {
+    const signatures = rows.map(signature);
+    const { flash: was, seen } = before.current;
+    before.current = { flash, seen: new Set(signatures) };
+    if (flash === undefined || flash !== was || !seen) return new Set();
+    return new Set(signatures.filter((s) => !seen.has(s)));
+  }, [rows, flash]);
 }
 
 const MIN_WIDTH = 40;
@@ -109,7 +126,9 @@ export function DataTable({
   onColumnFilters,
   ordered = false,
   empty = "No rows.",
+  flash,
 }) {
+  const fresh = useFresh(rows, flash);
   const [own, setOwn] = useState("");
   const filter = lifted ?? own;
   const setFilter = onFilter ?? setOwn;
@@ -155,6 +174,7 @@ export function DataTable({
 
   // A node's rows are one group unless sorted otherwise: the node is written once per group.
   const grouped = !sort && !ordered;
+  const twins = new Map();
   return html`<div class="data-table">
     <div class="table-tools">
       <input class="filter" value=${filter} onInput=${(e) => setFilter(e.target.value)}
@@ -194,7 +214,12 @@ export function DataTable({
             </thead>
             <tbody>${visible.slice(0, shown).map((row, r) => {
               const first = r === 0 || visible[r - 1][0] !== row[0];
-              return html`<tr class=${grouped && first && r > 0 ? "group" : ""}>${row.map((cell, i) =>
+              const sig = signature(row);
+              const n = (twins.get(sig) ?? 0) + 1;
+              twins.set(sig, n);
+              const classes = [grouped && first && r > 0 && "group", fresh.has(sig) && "fresh"].filter(Boolean);
+              // Keyed by content, so a changed row is a new element and its flash plays again.
+              return html`<tr key=${`${sig}\u0002${n}`} class=${classes.join(" ")}>${row.map((cell, i) =>
                 i === 0
                   ? html`<td class="node-cell">${!grouped || first
                       ? onNode && cell !== "-" ? html`<a onClick=${() => onNode(cell)}>${cell}</a>` : cell

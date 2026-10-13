@@ -87,7 +87,7 @@ function Before({ incident, started }) {
   return html`
     ${atStart &&
     html`<p class="note">Raised as the server started, at ${clock(started)}: the ${changes.length >= 200 ? "200 or more" : changes.length} changes below are how the fabric
-      differed from when fcli last saw it, not what led up to this.
+      differed from when fcling last saw it, not what led up to this.
       <button class="link-button inline" onClick=${() => setOpen(!open)}>${open ? "Hide them" : "Show them"}</button></p>`}
     ${open &&
     html`<p class="muted small">${changes.length >= 200 ? "The latest 200" : changes.length} changes, newest first: ${counts}</p>

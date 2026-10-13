@@ -9,8 +9,11 @@ export const REPORT_GROUPS = [
   ["Platform", ["sys-info", "config-commits", "components", "resources", "transceivers"]],
   ["Interfaces", ["subif", "lag", "ifstats", "lldp"]],
   ["Routing", ["bgp-peers", "ipv4-rib", "ipv6-rib", "static-routes", "routing-pol", "bfd", "isis", "ospf", "tunnel-table"]],
-  ["Services", ["services", "bridge-domains", "routers", "ni", "irb", "mac", "arp", "nd", "es", "es-dest", "vxlan"]],
+  ["Services", ["ni", "irb", "mac", "arp", "nd", "es", "es-dest", "vxlan"]],
 ];
+
+/** Reports the navigation leaves out: the Services lens shows them end to end. */
+export const UNLISTED = new Set(["services", "bridge-domains", "routers"]);
 
 /** What the reports are called on screen; the CLI keeps the short names. */
 export const REPORT_TITLES = {
@@ -133,7 +136,7 @@ export function ReportView({ name, query, go, at, catalog }) {
       ? html`<p class="error-text">${state.error}</p>`
       : !answer
         ? html`<p class="muted">Reading ${name}…</p>`
-        : html`<${DataTable} key=${name} columns=${answer.columns} rows=${answer.rows}
+        : html`<${DataTable} key=${name} columns=${answer.columns} rows=${answer.rows} flash=${key}
                              filter=${rowFilter} onFilter=${(q) => {
                                setRowFilter(q);
                                keep(q, columnFilters);

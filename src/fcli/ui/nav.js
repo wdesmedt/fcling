@@ -3,7 +3,7 @@
 import { html, useState } from "./vendor/preact-htm.module.js";
 import { natural } from "./api.js";
 import { LENS_VIEWS } from "./lenses.js";
-import { REPORT_GROUPS, reportTitle } from "./reports.js";
+import { REPORT_GROUPS, UNLISTED, reportTitle } from "./reports.js";
 
 const ICONS = {
   topology: "◇",
@@ -25,7 +25,7 @@ function Item({ href, active, icon, label, children, onClick, title }) {
 /** Reports grouped as REPORT_GROUPS says; anything new lands in "Other". The BGP RIB families get a group. */
 function groups(catalog) {
   const known = new Set(REPORT_GROUPS.flatMap(([, names]) => names));
-  const visible = catalog.filter((r) => !r.hidden).map((r) => r.name);
+  const visible = catalog.filter((r) => !r.hidden && !UNLISTED.has(r.name)).map((r) => r.name);
   const out = REPORT_GROUPS.map(([title, names]) => [title, names.filter((n) => visible.includes(n))]);
   const rib = catalog.filter((r) => r.hidden && r.name.startsWith("bgp-rib-")).map((r) => r.name).sort(natural);
   if (rib.length) out.splice(3, 0, ["BGP RIB", rib]);

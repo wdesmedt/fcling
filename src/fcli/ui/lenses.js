@@ -246,10 +246,8 @@ function card(id, rows, part = "") {
     macs: rows.reduce((n, r) => n + r.macs_local, 0),
     state: down === rows.length ? "down" : down ? "mixed" : "up",
     issues: rows.filter((r) => r.issues.length).length,
-    // The gateways' bgp-vpn instance for this part: their site side, or their WAN side.
-    instances: part
-      ? uniq(rows.filter((r) => r.gateway).flatMap((r) => (wan ? wanSide(r) : siteSide(r)).map((v) => v.id)))
-      : [],
+    // A site's part of a service stitched across sites: the site's number.
+    domain: part === "site" ? (rows[0].site.match(/\d+$/)?.[0] ?? rows[0].site) : "",
   };
 }
 
@@ -277,9 +275,9 @@ const order = (a, b) => (a.part === "wan") - (b.part === "wan") || natural(a.sit
 
 const Pills = ({ card }) => html`
   ${card.part === "wan" && html`<span class="pill dci">${card.dci}</span>`}
-  ${card.instances.length > 0 &&
-  html`<span class="pill instance" title="the bgp-vpn instance on the gateways that connects it">
-    instance ${card.instances.join(", ")}</span>`}
+  ${card.domain &&
+  html`<span class="pill instance" title=${`its part in ${card.sites[0]}, stitched to the others by its gateways`}>
+    domain ${card.domain}</span>`}
   <span class=${`pill state-${card.state}`}>${card.state}</span>
   ${card.issues > 0 && html`<span class="pill error">${plural(card.issues, "issue")}</span>`}`;
 
@@ -366,7 +364,7 @@ function facts(card) {
   const wan = card.part === "wan";
   const sites = card.sites.filter(Boolean);
   return [
-    sites.length > 1 ? `${sites.length} sites` : sites[0],
+    sites.length > 1 ? `${sites.length} sites` : !card.domain && sites[0],
     !wan && plural(card.nodes.length, "node"),
     card.gateways.length > 0 && plural(card.gateways.length, "gateway"),
     card.vnis.length > 0 && `VNI ${card.vnis.join(", ")}`,
