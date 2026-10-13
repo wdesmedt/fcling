@@ -38,12 +38,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from . import config
 from .checks import FLAP_WINDOW, Finding, required, run_checks
 from .collect import MAX_FOLLOW, UNKNOWN_ELEMENT, by_type, get_notifications
 from .delta import Change, Op, diff, keyed
 from .fabric import Fabric
 from .gnmi import path as gpath
-from .gnmi.client import GnmiClient, GnmiError, RpcFailed, Subscription, SubscriptionMode
+from .gnmi.client import DataType, GnmiClient, GnmiError, RpcFailed, Subscription, SubscriptionMode
 from .gnmi.path import Path
 from .inventory import Node
 from .report import NodeState, Read, Record, Report
@@ -81,6 +82,13 @@ CHECKS_EVERY = 30.0
 
 #: Seconds the checks wait at most for every node to be read once.
 STARTUP_GRACE = 60.0
+
+#: What logs the commits whose configurations are kept.
+COMMITS_REPORT = "config-commits"
+
+#: Seconds after a commit is seen before the configuration is read: commits
+#: made one after another are read once.
+CONFIG_SETTLE = 2.0
 
 #: Reconnect delays, doubled from the first up to the last.
 BACKOFF = (2.0, 60.0)
@@ -224,6 +232,8 @@ class NodeStream:
         #: A report that follows reads was touched: what it wants may be new.
         self._follow_pending = False
         self._stream_heard: list[float] = []
+        #: The session's connection while there is one: what one-off Gets go over.
+        self.client: GnmiClient | None = None
 
     # --------------------------------------------------------------- status
 
@@ -293,7 +303,11 @@ class NodeStream:
             try:
                 async with GnmiClient(self.node.target()) as client:
                     self.models = dict(client.capabilities.models) if client.capabilities else {}
-                    await self._session(client)
+                    self.client = client
+                    try:
+                        await self._session(client)
+                    finally:
+                        self.client = None
             except asyncio.CancelledError:
                 raise
             except BaseException as exc:  # noqa: BLE001 - every failure is a reconnect
@@ -483,6 +497,11 @@ class Engine:
         #: Per-node rendered table rows for :func:`fcli.render.table_rows`.
         self.table_cache: dict[tuple[str, str], tuple[str, list[list[str]]]] = {}
         self.started = time.time()
+        #: Configurations are kept after each commit when there is a history and a commit log.
+        self.keeps_configs = store is not None and COMMITS_REPORT in self.plan.reports
+        self._config_reads: dict[str, asyncio.Task[None]] = {}
+        #: Nodes that committed again while their configuration was being read.
+        self._config_again: set[str] = set()
 
     # -------------------------------------------------------------- listen
 
@@ -507,6 +526,9 @@ class Engine:
         # A node going away or coming back is a finding raised or cleared.
         self._checks_due = self.checks
         self._wake.set()
+        if stream.status is Status.LIVE:
+            # What was committed while the engine was away, or the first configuration kept.
+            self._read_config(stream.node.name)
         if stream.status is Status.DOWN:
             logger.warning("%s: %s", stream.node.name, stream.error)
         else:
@@ -566,8 +588,54 @@ class Engine:
             # history and on its way to the listeners.
             self.records.update(records)
             self._remember(changes)
+            for node in {c.node for c in kept if c.report == COMMITS_REPORT and c.op is Op.ADD}:
+                self._read_config(node)
             for change in changes:
                 self._publish({"type": "change", **change.as_dict()})
+
+    def _read_config(self, node: str) -> None:
+        """Read and keep *node*'s configuration soon; again after a read already under way."""
+        if not self.keeps_configs:
+            return
+        task = self._config_reads.get(node)
+        if task is None or task.done():
+            self._config_reads[node] = asyncio.get_running_loop().create_task(self._keep_configs(node))
+        else:
+            self._config_again.add(node)
+
+    async def _keep_configs(self, node: str) -> None:
+        while True:
+            self._config_again.discard(node)
+            await self._keep_config(node)
+            if node not in self._config_again:
+                return
+
+    async def _keep_config(self, node: str) -> None:
+        assert self.store is not None
+        await asyncio.sleep(CONFIG_SETTLE)
+        stream = self.streams[node]
+        if stream.client is None or stream.status is not Status.LIVE:
+            return
+        try:
+            notifications = await stream.client.get(["/"], DataType.CONFIG)
+        except GnmiError as exc:
+            logger.warning("%s: could not read the configuration: %s", node, exc)
+            return
+        salt = await self.store.run(lambda store: store.salt())
+        updates = [(gpath.format(p), v) for n in notifications for p, v in n.updates]
+        tree = await asyncio.to_thread(config.normalize, updates, salt)
+        # The commit log as the node has it now, not as last evaluated: right after a
+        # (re)connect, the reports may not have run yet.
+        commits = self.plan.reports[COMMITS_REPORT].run(stream.state())
+        commit_id = max((getattr(c, "id", 0) for c in commits), default=None)
+        lines = len(config.flatten(tree))
+        now = time.time()
+        kept = await self.store.run(
+            lambda store: store.keep_config(node, now, commit_id, tree, config.digest(tree), lines)
+        )
+        if kept:
+            logger.info("%s: kept its configuration after commit %s", node, commit_id)
+            self._publish({"type": "config", "node": node, "commit": commit_id, "ts": now})
 
     def _ready(self) -> bool:
         """Whether every node has been read once, or found unreachable - or long enough has passed."""

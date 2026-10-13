@@ -776,6 +776,87 @@ def drift(settings: Settings, since: str, until: str | None, reports: tuple[str,
     _print_changes(changes, "table")
 
 
+_DIFF_STYLE = {"added": "green", "removed": "red", "changed": "yellow"}
+
+
+@main.command("config-diff")
+@click.argument("node")
+@click.argument("commit", type=int, required=False)
+@click.option(
+    "--base", type=int, help="compare with the configuration after this commit [default: the one before]"
+)
+@click.option("-C", "--context", default=3, show_default=True, help="unchanged lines around each change")
+@click.option("--list", "listing", is_flag=True, help="list the configurations kept for NODE instead")
+@click.pass_obj
+def config_diff(
+    settings: Settings, node: str, commit: int | None, base: int | None, context: int, listing: bool
+) -> None:
+    """What a commit changed in a node's configuration, side by side
+
+    The server keeps each node's configuration after every commit it sees,
+    secrets redacted. Without COMMIT, the latest change.
+    """
+    query = [("node", node), ("context", str(context))]
+    query += [("commit", str(commit))] if commit is not None else []
+    query += [("base", str(base))] if base is not None else []
+    if settings.remote() is not None:
+        answer = _remote_get(settings, "/api/configs" if listing else "/api/configs/diff", query)
+    else:
+        store = _local_store(settings)
+        try:
+            answer = (
+                views.configs(store, [node])
+                if listing
+                else views.config_diff(store, node, commit, base, context)
+            )
+        except LookupError as exc:
+            raise click.ClickException(str(exc)) from exc
+        finally:
+            store.close()
+    if _dump(answer, settings.output):
+        return
+    if listing:
+        for c in answer:
+            click.echo(f"commit {c['commit_id'] or '-':>6}  {_when(c['ts'])}  {c['lines']:6} lines")
+        return
+    _print_config_diff(answer)
+
+
+def _print_config_diff(answer: dict[str, Any]) -> None:
+    from rich import box as rich_box
+    from rich.table import Table
+    from rich.text import Text
+
+    console = Console()
+    spans = ", ".join(
+        f"{c.get('id')} by {c.get('username') or '?'}" + (f" ({c['comment']})" if c.get("comment") else "")
+        for c in answer["commits"]
+    )
+    before, after = answer["before"], answer["after"]
+    console.print(f"[bold]{answer['node']}[/]: {answer['summary']}" + (f" — commit {spans}" if spans else ""))
+    if before is None:
+        console.print("[dim]nothing kept before it to compare with[/]")
+        return
+    table = Table(box=rich_box.SIMPLE_HEAD, expand=True, show_edge=False, pad_edge=False)
+    table.add_column("", justify="right", style="dim", no_wrap=True)
+    table.add_column(f"after commit {before['commit_id']} · {_when(before['ts'])}", ratio=1, overflow="fold")
+    table.add_column("", justify="right", style="dim", no_wrap=True)
+    table.add_column(f"after commit {after['commit_id']} · {_when(after['ts'])}", ratio=1, overflow="fold")
+    for row in answer["rows"]:
+        if row["kind"] == "skip":
+            table.add_row("", Text(f"⋯ {row['count']} unchanged lines", style="dim"), "", "")
+            continue
+        left, right = row.get("left"), row.get("right")
+        style = _DIFF_STYLE.get(row["kind"], "")
+        table.add_row(
+            str(left["n"]) if left else "",
+            Text(left["text"], style=style) if left else "",
+            str(right["n"]) if right else "",
+            Text(right["text"], style=style) if right else "",
+        )
+    console.print(table)
+
+
 # --------------------------------------------------------------------------- #
 # models: MCP and the agent
 # --------------------------------------------------------------------------- #

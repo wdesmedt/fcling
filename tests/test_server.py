@@ -391,3 +391,31 @@ def test_an_acknowledgement_whose_finding_cleared_while_stopped_ends_on_restart(
             assert client.get("/api/incidents").json() == []
         store.close()
     assert AckStore(kept).all() == []
+
+
+def test_configuration_diffs(target: FakeTarget, tmp_path: Path) -> None:
+    from fcli import config
+    from fcli.delta import Change, Op
+
+    client, store = _client(target, tmp_path)
+    before = {"interface": [{"name": "ethernet-1/1", "admin-state": "enable"}]}
+    after = {"interface": [{"name": "ethernet-1/1", "admin-state": "disable"}]}
+    record = {"node": "leaf1", "id": 8, "username": "ops", "comment": "shut e1/1"}
+    store.store.write([Change(199.0, "leaf1", "config-commits", "[8]", Op.ADD, None, record)])
+    store.store.keep_config("leaf1", 100.0, 7, before, config.digest(before), 1)
+    store.store.keep_config("leaf1", 200.0, 8, after, config.digest(after), 1)
+    with client:
+        assert [c["commit_id"] for c in client.get("/api/configs", params={"node": "leaf1"}).json()] == [8, 7]
+        diff = client.get("/api/configs/diff", params={"node": "leaf1", "commit": "8"}).json()
+        assert diff["commits"] == [record]
+        (row,) = diff["rows"]
+        assert (row["kind"], row["left"]["text"], row["right"]["text"]) == (
+            "changed",
+            "set / interface ethernet-1/1 admin-state enable",
+            "set / interface ethernet-1/1 admin-state disable",
+        )
+        assert client.get("/api/configs/diff", params={"node": "leaf1", "commit": "9"}).status_code == 400
+        assert client.get("/api/configs/diff").status_code == 400
+        (commit,) = client.get("/api/history", params={"report": "config-commits"}).json()
+        assert (commit["origin"], commit["commit"]) == ("config", {"node": "leaf1", "id": 8})
+    store.close()

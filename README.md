@@ -43,9 +43,10 @@ uv run fcling incidents -v                    # grouped by root cause, worst fir
 uv run fcling incidents --at 14:02            # what was wrong then
 uv run fcling baseline pre-change -m "before the MTU change"
 uv run fcling drift pre-change                # what came, went and changed since
+uv run fcling config-diff leaf1 12             # what commit 12 did to leaf1's configuration, side by side
 ```
 
-Ask, or let your own AI client ask. Both get the same 8 read-only tools: status, reports, incidents, checks, history, drift and baselines.
+Ask, or let your own AI client ask. Both get the same 14 read-only tools: status, reports, incidents, checks, history, configuration diffs, drift, baselines, the lenses and the topology.
 
 ```bash
 uv sync --extra server --extra mcp --extra ai
@@ -116,7 +117,7 @@ inventory ──► collect ──► gNMI Get (one per datatype, all nodes at o
 | [incidents.py](src/fcli/incidents.py) | Findings anchored to what they are about (a cable, a session, a node, the underlay between two nodes) and grouped by root cause. The same cause in many places folds into one pattern. |
 | [views.py](src/fcli/views.py) | One place for fabric-wide answers from any source (the nodes now, the engine, the history at an instant): checks, incidents, drift, and history attributed to the configuration commit that preceded it. |
 | [service.py](src/fcli/service.py) | The questions every surface asks, behind one interface with three implementations: the engine in this process, a running server over HTTP, or the nodes one-shot. |
-| [tools.py](src/fcli/tools.py) | 8 read-only tools over a Service. Inputs are pydantic models that are validated before anything runs; outputs are compact JSON with row limits. One definition serves both MCP clients and the agent. |
+| [tools.py](src/fcli/tools.py) | 14 read-only tools over a Service. Inputs are pydantic models that are validated before anything runs; outputs are compact JSON with row limits. One definition serves both MCP clients and the agent. |
 | [mcp.py](src/fcli/mcp.py) | The tools as an MCP server: streamable HTTP at `/mcp` on `fcling serve` (stateless, with DNS-rebinding protection on localhost), or stdio via `fcling mcp`. |
 | [agent.py](src/fcli/agent.py) | The in-app agent, provider-neutral: streaming, concurrent tool calls, and append-only conversations kept server-side in the provider's own format. |
 | [llm.py](src/fcli/llm.py) | The providers. **Claude** (Anthropic SDK): adaptive thinking, cached prompt and tools, server-side refusal fallback, `claude-opus-5-5` at `medium`. **OpenAI** (Responses API: `store` off, reasoning replayed encrypted), `gpt-5.6-sol`. `OPENAI_API=chat` switches to Chat Completions for proxies. **Grok** (Chat Completions at api.x.ai), `grok-4.6`. The provider is `FCLI_LLM_PROVIDER` or the first one with a key, Claude first; model and effort come from `FCLI_MODEL` / `FCLI_EFFORT` or each provider's own variables. |

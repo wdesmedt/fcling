@@ -17,8 +17,23 @@ const PAGE = 300;
 const SETTLE_MS = 3000;
 
 const kindOf = (c) =>
-  c.report === "checks" ? (c.op === "add" ? "raised" : "cleared") : c.report === "config-commits" ? "commit" : "change";
-const KINDS = ["raised", "cleared", "commit", "change"];
+  c.report === "checks"
+    ? c.op === "add" ? "raised" : "cleared"
+    : c.report === "config-commits" ? "commit" : c.origin === "config" ? "config" : "change";
+const KINDS = ["raised", "cleared", "commit", "config", "change"];
+const KIND_LABEL = {
+  raised: "finding raised",
+  cleared: "finding cleared",
+  commit: "commit",
+  config: "change after a commit",
+  change: "unplanned change",
+};
+/** Configuration commits and what they caused, or what the network did on its own. */
+const ORIGINS = [
+  ["", "everything"],
+  ["config", "config"],
+  ["unplanned", "unplanned"],
+];
 
 function Timeline({ changes, from, to, range, onRange }) {
   const width = 1000;
@@ -49,7 +64,7 @@ function Timeline({ changes, from, to, range, onRange }) {
           y -= h;
           return h > 0 && html`<rect class=${`k-${k}`} x=${i * bar + 1} y=${y} width=${bar - 2} height=${h} />`;
         })}
-        <title>${clock(start)}: ${KINDS.filter((k) => b[k]).map((k) => `${b[k]} ${k}`).join(", ") || "nothing"}</title>
+        <title>${clock(start)}: ${KINDS.filter((k) => b[k]).map((k) => `${b[k]} ${KIND_LABEL[k]}`).join(", ") || "nothing"}</title>
       </g>`;
     })}
   </svg>
@@ -60,11 +75,12 @@ export function HistoryView({ query, go, graph, catalog }) {
   const span = WINDOWS.find(([w]) => w === query.since) ?? WINDOWS[1];
   const report = query.report || "";
   const node = query.node || "";
+  const origin = ORIGINS.some(([o]) => o === query.origin) ? query.origin : "";
   const [state, setState] = useState({ changes: null, error: "", to: Date.now() / 1000 });
   const [range, setRange] = useState(null);
   const [shown, setShown] = useState(PAGE);
   const pending = useRef(null);
-  const set = (change) => go(withQuery("history", { since: span[0], report, node, ...change }));
+  const set = (change) => go(withQuery("history", { since: span[0], report, node, origin, ...change }));
 
   useEffect(() => {
     let current = true;
@@ -91,17 +107,24 @@ export function HistoryView({ query, go, graph, catalog }) {
     };
   }, [span[0], report, node]);
 
-  const changes = state.changes ?? [];
+  const all = state.changes ?? [];
+  const changes = origin ? all.filter((c) => c.origin === origin) : all;
   const listed = (range ? changes.filter((c) => range[0] <= c.ts && c.ts < range[1]) : changes).slice().reverse();
+  const configured = all.filter((c) => c.origin === "config").length;
   const reports = ["checks", "config-commits", ...catalog.filter((r) => !r.hidden).map((r) => r.name).filter((n) => n !== "config-commits").sort(natural)];
   return html`<div class="history-view">
     <div class="view-head">
       <h2>History</h2>
-      <span class="muted">every change the engine kept, with the commit likely to have caused it</span>
+      <span class="muted">every change the engine kept: configuration commits and what they caused, apart from what the network did on its own</span>
     </div>
     <div class="filters">
       <div class="segmented">${WINDOWS.map(
         ([w]) => html`<button class=${w === span[0] ? "on" : ""} onClick=${() => set({ since: w })}>${w}</button>`,
+      )}</div>
+      <div class="segmented" title="Configuration commits and the changes put down to one, or the rest">${ORIGINS.map(
+        ([o, name]) => html`<button class=${o === origin ? "on" : ""} onClick=${() => set({ origin: o })}>${
+          o === "config" ? html`<span class="tag-config">CONFIG</span>` : name
+        }</button>`,
       )}</div>
       <select value=${report} onChange=${(e) => set({ report: e.target.value })} aria-label="Report">
         <option value="">every report</option>
@@ -112,18 +135,18 @@ export function HistoryView({ query, go, graph, catalog }) {
         ${graph.nodes.map((n) => n.name).sort(natural).map((n) => html`<option value=${n}>${n}</option>`)}
       </select>
       <span class="legend-inline">
-        ${KINDS.map((k) => html`<span><i class=${`sw k-${k}`}></i>${k === "change" ? "other change" : k === "raised" ? "finding raised" : k === "cleared" ? "finding cleared" : "commit"}</span>`)}
+        ${KINDS.map((k) => html`<span><i class=${`sw k-${k}`}></i>${KIND_LABEL[k]}</span>`)}
       </span>
     </div>
     ${state.error && html`<p class="error-text">${state.error}</p>`}
     ${state.changes &&
     html`<${Timeline} changes=${changes} from=${state.to - span[1]} to=${state.to} range=${range} onRange=${setRange} />
       <div class="summary-line">
-        <span class="muted">${changes.length >= LIMIT ? `the latest ${LIMIT} changes` : `${changes.length} changes`} in the last ${span[0]}</span>
+        <span class="muted">${all.length >= LIMIT ? `the latest ${LIMIT} changes` : `${all.length} changes`} in the last ${span[0]}:${" "}${configured} configuration-related, ${all.length - configured} unplanned${origin ? ` — showing the ${origin === "config" ? "configuration-related" : "unplanned"} ones` : ""}</span>
         ${range && html`<span class="chip">${clock(range[0])} – ${clock(range[1])} <a onClick=${() => setRange(null)}>✕</a></span>`}
       </div>
       ${listed.length
-        ? html`<ul class="changes">${listed.slice(0, shown).map((c) => html`<${Change} change=${c} />`)}</ul>`
+        ? html`<ul class="changes">${listed.slice(0, shown).map((c) => html`<${Change} key=${c.seq} change=${c} />`)}</ul>`
         : html`<p class="muted">Nothing changed${range ? " then" : ""}.</p>`}
       ${listed.length > shown && html`<button class="more" onClick=${() => setShown(shown + PAGE)}>Show more</button>`}`}
     ${!state.changes && !state.error && html`<p class="muted">Reading the history…</p>`}

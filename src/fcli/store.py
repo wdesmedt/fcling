@@ -17,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 import sqlite3
 import time
+import zlib
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -49,6 +51,19 @@ CREATE TABLE IF NOT EXISTS baselines (
     ts REAL NOT NULL,
     created REAL NOT NULL,
     comment TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS configs (
+    node TEXT NOT NULL,
+    ts REAL NOT NULL,
+    commit_id INTEGER,
+    digest TEXT NOT NULL,
+    lines INTEGER NOT NULL,
+    tree BLOB NOT NULL,
+    PRIMARY KEY (node, ts)
+);
+CREATE TABLE IF NOT EXISTS meta (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS current (
     node TEXT NOT NULL,
@@ -198,6 +213,66 @@ class Store:
             (report,),
         )
         return {(r["node"], r["key"]): r["ts"] for r in rows}
+
+    # ---------------------------------------------------------- configurations
+
+    def salt(self) -> str:
+        """This history's own salt for secret digests: they say nothing about another's."""
+        row = self.db.execute("SELECT value FROM meta WHERE name = 'salt'").fetchone()
+        if row:
+            return str(row[0])
+        with self.db:
+            self.db.execute(
+                "INSERT OR IGNORE INTO meta (name, value) VALUES ('salt', ?)", (secrets.token_hex(16),)
+            )
+        return self.salt()
+
+    def keep_config(
+        self, node: str, ts: float, commit_id: int | None, tree: Any, digest: str, lines: int
+    ) -> bool:
+        """Keep *node*'s configuration as of *ts*, unless it is the one kept last; whether it was kept."""
+        last = self.db.execute(
+            "SELECT digest FROM configs WHERE node = ? ORDER BY ts DESC LIMIT 1", (node,)
+        ).fetchone()
+        if last and last[0] == digest:
+            return False
+        blob = zlib.compress(json.dumps(tree, separators=(",", ":")).encode())
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO configs (node, ts, commit_id, digest, lines, tree)"
+                " VALUES (?,?,?,?,?,?)",
+                (node, ts, commit_id, digest, lines, blob),
+            )
+        return True
+
+    def configs(self, nodes: Sequence[str] = ()) -> list[dict[str, Any]]:
+        """The configurations kept, newest first, without their trees."""
+        where = f" WHERE node IN ({','.join('?' * len(nodes))})" if nodes else ""
+        rows = self.db.execute(
+            f"SELECT node, ts, commit_id, digest, lines FROM configs{where} ORDER BY ts DESC", list(nodes)
+        )
+        return [dict(r) for r in rows]
+
+    def config(
+        self, node: str, commit_id: int | None = None, before: float | None = None
+    ) -> dict[str, Any] | None:
+        """A kept configuration of *node*, with its tree: the latest; the first kept at or after
+        *commit_id*; or the last kept before *before*."""
+        args: list[Any] = []
+        if commit_id is not None:
+            sql, args = "commit_id >= ? ORDER BY ts ASC", [commit_id]
+        elif before is not None:
+            sql, args = "ts < ? ORDER BY ts DESC", [before]
+        else:
+            sql = "1 ORDER BY ts DESC"
+        row = self.db.execute(
+            f"SELECT * FROM configs WHERE node = ? AND {sql} LIMIT 1", [node, *args]
+        ).fetchone()
+        if row is None:
+            return None
+        out = {k: row[k] for k in ("node", "ts", "commit_id", "digest", "lines")}
+        out["tree"] = json.loads(zlib.decompress(row["tree"]))
+        return out
 
     # ------------------------------------------------------------- baselines
 

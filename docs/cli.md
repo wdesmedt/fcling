@@ -89,5 +89,5 @@ A path that a node's release or platform doesn't have reads as empty, not as an 
 |---|---|
 | `where`, `path`, `service`, `endpoints`, `topology` | [lenses.md](lenses.md) |
 | `checks`, `incidents` | [checks.md](checks.md) |
-| `serve`, `history`, `baseline`, `baselines`, `drift` | [server.md](server.md), [history.md](history.md) |
+| `serve`, `history`, `baseline`, `baselines`, `drift`, `config-diff` | [server.md](server.md), [history.md](history.md) |
 | `ask`, `mcp` | [ai.md](ai.md) |

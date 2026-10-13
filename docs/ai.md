@@ -1,6 +1,6 @@
 # MCP and the agent
 
-fcli offers its fabric to language models in two ways: as MCP tools for an AI client you already use, and as a built-in agent. Both use the same thirteen tools, so both see the same fabric.
+fcli offers its fabric to language models in two ways: as MCP tools for an AI client you already use, and as a built-in agent. Both use the same fourteen tools, so both see the same fabric.
 
 ## The tools
 
@@ -13,7 +13,8 @@ All of them are read-only.
 | `get_report` | one report, narrowed by `nodes`, `inv` (labels) and `where` (`column=regex`). `params` takes report parameters; `detail` returns full records instead of table rows; `limit` (default 100) caps the rows and says how many more there were. |
 | `get_incidents` | findings grouped by root cause: where triage starts |
 | `get_checks` | every finding, ungrouped, with when it was raised |
-| `get_history` | what changed, with the commit likely to have caused it |
+| `get_history` | what changed, with the commit likely to have caused it and whether it was configuration-related or unplanned (`origin`) |
+| `get_config_diff` | what a commit changed in a node's configuration, as `set /` lines added, removed and changed; secrets as digests |
 | `get_drift` | how the fabric differs from a baseline or time |
 | `list_baselines` | the named baselines |
 | `locate_address` | every place that knows an IP or MAC: the `where` lens ([lenses.md](lenses.md)) |

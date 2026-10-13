@@ -39,7 +39,28 @@ time                 node   report     op      key                      what    
 2026-10-13 14:02:31  leaf1  bgp-peers  change  ["default","10.0.0.2"]   state: established -> idle  commit 12 by admin (mtu change)
 ```
 
-Commits are matched by when the engine saw them, not by the node's clock, which need not agree with the server's.
+Commits are matched by when the engine saw them, not by the node's clock, which need not agree with the server's. The node's clock decides one thing only. A commit that ended more than 15 minutes before the engine saw it was read from the commit log when the node was first synced, along with everything else, so it is not the cause of anything.
+
+### Configuration-related, or unplanned
+
+Each change has an `origin`. It is `config` for a commit and for anything put down to one, findings raised or cleared included. It is `unplanned` for the rest: what the network did on its own. `commit` names the commit (`{"node", "id"}`) whose diff explains it. The web UI tags configuration-related changes **CONFIG** and filters on it.
+
+## Configurations and their diffs
+
+Each node's running configuration is kept as well. The engine reads it (a gNMI Get of `/`, datatype `config`) when a node comes live, and again two seconds after every commit it sees. A configuration is kept only when it differs from the one kept before, and is stored with the latest commit it includes.
+
+Before anything is kept, every secret leaf (passwords and their hashes, keys, pre-shared and authentication keys, SNMP communities) is replaced by `<redacted 1a2b3c4d>`. That is a digest salted with a secret of this history alone, so a changed password still reads as changed, and nothing about it can be looked up.
+
+A commit's diff compares the configuration kept after it with the one kept before, as `set / ...` lines in the order SR Linux's `info flat` prints them:
+
+```bash
+fcling config-diff leaf1            # the latest change
+fcling config-diff leaf1 12         # what commit 12 did
+fcling config-diff leaf1 12 --base 9
+fcling config-diff leaf1 --list     # the configurations kept
+```
+
+The two configurations are shown side by side. A line only the newer one has is **added**, a line only the older one has is **removed**, and a leaf whose value changed is one **changed** row, with its old and new line next to each other. Three unchanged lines are kept around each change (`-C`), and the rest are folded. Commits made one after another can fall between two reads, and then one diff covers them all and names each one. The first configuration kept for a node has nothing to be compared with.
 
 ## The fabric at an instant
 

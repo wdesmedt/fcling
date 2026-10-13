@@ -2,6 +2,7 @@
 
 import { html, useEffect, useState } from "./vendor/preact-htm.module.js";
 import { SEVERITIES, ago, clock, get, send } from "./api.js";
+import { ConfigDiff } from "./configdiff.js";
 
 /** How far before an incident started to look for what changed. */
 const LOOKBACK = 15 * 60;
@@ -63,12 +64,19 @@ function FieldChange({ name, before, after }) {
  *  The line is a summary; clicked, it opens on every field in full. */
 export function Change({ change }) {
   const [open, setOpen] = useState(false);
+  const [diff, setDiff] = useState(false);
   const before = change.before || {};
   const after = change.after || {};
+  const commit = change.commit;
   let what;
   let detail = null;
   let more = false;
-  if (change.op === "change") {
+  if (change.report === "config-commits" && change.op === "add") {
+    // A commit opens on what it did to the configuration.
+    what = html`<span>commit <b>${after.id}</b> by ${after.username || "?"}${after.comment ? html` — <i>${after.comment}</i>` : ""}${after.status && after.status !== "complete" ? html` <span class="muted">(${after.status})</span>` : ""}</span>`;
+    more = true;
+    detail = open && html`<${ConfigDiff} node=${change.node} commit=${after.id} />`;
+  } else if (change.op === "change") {
     const fields = Object.keys(after).filter(
       (k) => k !== "node" && JSON.stringify(before[k]) !== JSON.stringify(after[k]),
     );
@@ -87,14 +95,21 @@ export function Change({ change }) {
     more = fields.length > 0;
     detail = html`<dl class="record">${fields.map((k) => html`<dt>${k}</dt><dd><pre>${full(record[k])}</pre></dd>`)}</dl>`;
   }
-  return html`<li class=${`change op-${change.op}${more ? " expandable" : ""}${open ? " open" : ""}`}
+  const config = change.origin === "config";
+  return html`<li class=${`change op-${change.op}${config ? " config" : ""}${more ? " expandable" : ""}${open ? " open" : ""}`}
                   onClick=${more ? () => setOpen(!open) : undefined}>
     <span class="when mono">${more && html`<span class="caret">${open ? "▾" : "▸"}</span>`}${clock(change.ts)}</span>
     <span class="who">${change.node}</span>
     <span class="report">${change.report}</span>
     <span class=${`op ${change.op}`}>${change.op}</span>
-    <span class="what">${what}</span>
-    ${change.cause && html`<span class="cause">← ${change.cause}</span>`}
+    <span class="what">${config && html`<span class="tag-config" title=${change.cause ? "likely caused by a configuration commit" : "a configuration commit"}>CONFIG</span>`}${what}</span>
+    ${change.cause &&
+    html`<span class="cause">← ${change.cause}${commit &&
+      html` <a class="diff-link" onClick=${(e) => {
+        e.stopPropagation();
+        setDiff(!diff);
+      }}>${diff ? "hide its diff" : "show its diff"}</a>`}</span>`}
+    ${diff && commit && html`<div class="change-detail" onClick=${(e) => e.stopPropagation()}><${ConfigDiff} node=${commit.node} commit=${commit.id} /></div>`}
     ${open && html`<div class="change-detail" onClick=${(e) => e.stopPropagation()}>${detail}</div>`}
   </li>`;
 }
@@ -141,7 +156,7 @@ function Before({ incident, started }) {
       <button class="link-button inline" onClick=${() => setOpen(!open)}>${open ? "Hide them" : "Show them"}</button></p>`}
     ${open &&
     html`<p class="muted small">${changes.length >= 200 ? "The latest 200" : changes.length} changes, newest first: ${counts}</p>
-      <ul class="changes">${(all ? changes : changes.slice(0, SHOWN)).map((c) => html`<${Change} change=${c} />`)}</ul>
+      <ul class="changes">${(all ? changes : changes.slice(0, SHOWN)).map((c) => html`<${Change} key=${c.seq} change=${c} />`)}</ul>
       ${!all && changes.length > SHOWN &&
       html`<button class="link-button" onClick=${() => setAll(true)}>Show ${changes.length - SHOWN} more</button>`}`}`;
 }

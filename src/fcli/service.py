@@ -143,6 +143,12 @@ class Service(Protocol):
 
     async def baselines(self) -> list[dict[str, Any]]: ...
 
+    async def configs(self, nodes: Sequence[str] = ()) -> list[dict[str, Any]]: ...
+
+    async def config_diff(
+        self, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+    ) -> dict[str, Any]: ...
+
     async def lens(
         self, name: str, args: dict[str, Any] | None = None, at: str | None = None
     ) -> dict[str, Any]: ...
@@ -510,6 +516,17 @@ class EngineService:
     async def baselines(self) -> list[dict[str, Any]]:
         return await self._store().run(Store.baselines)  # type: ignore[no-any-return]
 
+    async def configs(self, nodes: Sequence[str] = ()) -> list[dict[str, Any]]:
+        return await self._store().run(views.configs, list(nodes))  # type: ignore[no-any-return]
+
+    async def config_diff(
+        self, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+    ) -> dict[str, Any]:
+        try:
+            return await self._store().run(views.config_diff, node, commit, base, context)  # type: ignore[no-any-return]
+        except LookupError as exc:
+            raise ServiceError(str(exc)) from exc
+
     async def _fabric(self, reports: Sequence[str], at: str | None) -> Any:
         """The fabric over *reports*: live, at an instant, or - for one not streamed - collected now."""
         when = _instant(at)
@@ -610,6 +627,17 @@ class RemoteService:
     async def baselines(self) -> list[dict[str, Any]]:
         return await self._get("/api/baselines", [])  # type: ignore[no-any-return]
 
+    async def configs(self, nodes: Sequence[str] = ()) -> list[dict[str, Any]]:
+        return await self._get("/api/configs", [("node", n) for n in nodes])  # type: ignore[no-any-return]
+
+    async def config_diff(
+        self, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+    ) -> dict[str, Any]:
+        query = [("node", node), ("context", str(context))]
+        query += [("commit", str(commit))] if commit is not None else []
+        query += [("base", str(base))] if base is not None else []
+        return await self._get("/api/configs/diff", query)  # type: ignore[no-any-return]
+
     async def lens(
         self, name: str, args: dict[str, Any] | None = None, at: str | None = None
     ) -> dict[str, Any]:
@@ -696,6 +724,12 @@ class LocalService:
         raise ServiceError(_NO_HISTORY)
 
     async def baselines(self) -> list[dict[str, Any]]:
+        raise ServiceError(_NO_HISTORY)
+
+    async def configs(self, nodes: Sequence[str] = ()) -> list[dict[str, Any]]:
+        raise ServiceError(_NO_HISTORY)
+
+    async def config_diff(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ServiceError(_NO_HISTORY)
 
     async def lens(

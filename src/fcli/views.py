@@ -109,32 +109,62 @@ def drift_reports(store: Store) -> list[str]:
 #: Seconds after a configuration commit that a change on the same node is put down to it.
 ATTRIBUTION_WINDOW = 120.0
 
+#: Seconds a commit can have ended, by the node's clock, before the engine saw it and
+#: still be a cause. Older, it was read from the commit log when a node was first
+#: synced - with everything else, which it did not cause.
+FRESH_COMMIT = 900.0
+
+#: A commit, or a change - a finding raised or cleared too - put down to one.
+CONFIG = "config"
+#: Anything else: what the network did on its own.
+UNPLANNED = "unplanned"
+
+
+def _fresh(commit: Mapping[str, Any]) -> bool:
+    """Whether the engine saw *commit* being made, rather than found it in the log.
+
+    A commit whose time the node does not give is taken as fresh.
+    """
+    from .reports.common import parse_time as device_time
+
+    record = commit.get("after") or {}
+    made = device_time(record.get("ended")) or device_time(record.get("started"))
+    return made is None or commit["ts"] - made.timestamp() <= FRESH_COMMIT
+
 
 def attribute(changes: Sequence[dict[str, Any]], commits: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    """*changes*, each with the ``cause`` that most likely made it: the last
-    configuration commit on its node shortly before it.
+    """*changes*, each with the ``cause`` that most likely made it - the last
+    configuration commit on its node shortly before it - and its ``origin``:
+    ``config`` for a commit and what one caused, ``unplanned`` for the rest.
+    ``commit`` names the commit, ``{"node", "id"}``, for its configuration diff.
 
     Commits are matched by when the engine saw them, not by the node's clock,
     which need not agree with the server's.
     """
     by_node: dict[str, list[dict[str, Any]]] = {}
     for c in commits:
-        if c["report"] == "config-commits" and c["op"] == "add" and c.get("after"):
+        if c["report"] == "config-commits" and c["op"] == "add" and c.get("after") and _fresh(c):
             by_node.setdefault(c["node"], []).append(c)
     for node_commits in by_node.values():
         node_commits.sort(key=lambda c: c["ts"])
     out = []
     for change in changes:
         cause = ""
-        if change["report"] not in ("config-commits", "checks"):
+        commit_ref = None
+        if change["report"] == "config-commits":
+            record = change.get("after") or change.get("before") or {}
+            commit_ref = {"node": change["node"], "id": record.get("id")}
+        else:
             for commit in reversed(by_node.get(change["node"], [])):
                 if commit["ts"] <= change["ts"] + 1.0 and change["ts"] - commit["ts"] <= ATTRIBUTION_WINDOW:
                     a = commit["after"]
                     cause = f"commit {a.get('id')} by {a.get('username') or '?'}"
                     if a.get("comment"):
                         cause += f" ({a['comment']})"
+                    commit_ref = {"node": change["node"], "id": a.get("id")}
                     break
-        out.append({**change, "cause": cause})
+        origin = CONFIG if commit_ref else UNPLANNED
+        out.append({**change, "cause": cause, "origin": origin, "commit": commit_ref})
     return out
 
 
@@ -150,3 +180,58 @@ def history_with_causes(store: Store, **query: Any) -> list[dict[str, Any]]:
         limit=100_000,
     )
     return attribute(changes, commits)
+
+
+# --------------------------------------------------------------------------- #
+# configurations
+# --------------------------------------------------------------------------- #
+
+
+def _config_meta(kept: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    return None if kept is None else {k: kept[k] for k in ("ts", "commit_id", "lines", "digest")}
+
+
+def config_diff(
+    store: Store, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+) -> dict[str, Any]:
+    """What a commit did to *node*'s configuration, as a side-by-side diff.
+
+    The configuration after *commit* (the latest without one) is the first
+    kept from that commit on, and it is compared with the one kept before
+    it - or with the one kept after commit *base*. Several commits made
+    between two reads are one diff; ``commits`` lists them. With nothing kept
+    earlier, ``before`` is ``None`` and there are no rows.
+    """
+    from . import config
+
+    after = store.config(node, commit_id=commit) if commit is not None else store.config(node)
+    if after is None:
+        raise LookupError(
+            f"no configuration of {node} kept" + (f" from commit {commit} on" if commit is not None else "")
+        )
+    before = (
+        store.config(node, commit_id=base) if base is not None else store.config(node, before=after["ts"])
+    )
+    if before is not None and before["ts"] >= after["ts"]:
+        before, after = after, before
+    low = (before or {}).get("commit_id") or 0
+    high = after.get("commit_id") or 0
+    commits: dict[int, dict[str, Any]] = {}
+    for change in store.history(nodes=[node], reports=["config-commits"], limit=100_000):
+        record = change.get("after") or {}
+        if change["op"] != "remove" and isinstance(record.get("id"), int) and low < record["id"] <= high:
+            commits[record["id"]] = record
+    answer: dict[str, Any] = {
+        "node": node,
+        "before": _config_meta(before),
+        "after": _config_meta(after),
+        "commits": [commits[i] for i in sorted(commits)],
+    }
+    if before is None:
+        return {**answer, "rows": [], "summary": "the first configuration kept"}
+    return {**answer, **config.compare(before["tree"], after["tree"], context).as_dict()}
+
+
+def configs(store: Store, nodes: Sequence[str] = ()) -> list[dict[str, Any]]:
+    """The configurations kept, newest first."""
+    return store.configs(nodes)

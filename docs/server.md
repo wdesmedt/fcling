@@ -61,10 +61,12 @@ Every endpoint takes `inv=KEY=GLOB` and `node=NAME`, both repeatable, to narrow 
 | `GET /api/checks` | findings, with when each was raised (`?at=`, `?check=`) |
 | `GET /api/incidents` | findings grouped by root cause (`?at=`); live, each says whether it is `acknowledged` |
 | `GET/POST/DELETE /api/acks` | the acknowledged findings; `POST {"incident": id, "note": ""}` acknowledges an open incident, `DELETE ?incident=id` takes it off |
-| `GET /api/history` | changes, oldest first, each with its likely cause (`since`, `until`, `report`, `limit`, `after`) |
+| `GET /api/history` | changes, oldest first, each with its likely cause and `origin` (`config` or `unplanned`) (`since`, `until`, `report`, `limit`, `after`) |
 | `GET /api/lenses` | every lens, with its arguments, columns and record JSON schema |
 | `GET /api/lenses/{name}` | a lens's records: its arguments as query parameters (`?address=10.1.3.13`), `?at=` from history ([lenses.md](lenses.md)); `?table=1` as for reports |
 | `GET /api/topology` | the fabric as a graph: nodes with tier and health, links, clients, segments, components (`?at=`) |
+| `GET /api/configs` | the configurations kept, newest first (`node`) |
+| `GET /api/configs/diff` | what a commit did to a node's configuration, side by side (`node`, `commit`, `base`, `context`) |
 | `GET /api/drift` | how the fabric differs from a baseline or time (`from`, `to`, `report`) |
 | `GET/POST /api/baselines`, `DELETE /api/baselines/{name}` | named points in time |
 | `GET /api/events` | server-sent events (below) |
@@ -79,6 +81,7 @@ Errors are JSON, `{"error": "..."}`, with status 400 or 404. An `at` before the 
 `GET /api/events` is a server-sent event stream. It opens with one `status` event (every node's state), followed by:
 
 - **`node`:** a node's state changed.
+- **`config`:** a node's configuration was kept after a commit (`node`, `commit`, `ts`).
 - **`change`:** a record was added, removed or changed. `op` is `add`, `remove`, `change`, or `update` (volatile fields only; see [history.md](history.md)). Every change except `update` has a sequence number as its event id.
 
 Filter with `report=` and `node=`. A client that reconnects with `Last-Event-ID` (or `after=SEQ`) first receives the changes it missed, replayed from the history. A client that falls more than 10,000 events behind is disconnected, and catches up the same way when it reconnects.

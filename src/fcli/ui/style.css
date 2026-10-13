@@ -16,6 +16,14 @@
   --warning-soft: #fef3c7;
   --error-soft: #fee2e2;
   --info-soft: #e2e8f0;
+  --config: #7c3aed;
+  --config-soft: #ede9fe;
+  --diff-added: #e6ffec;
+  --diff-added-mark: #abf2bc;
+  --diff-removed: #ffebe9;
+  --diff-removed-mark: #ffc1bc;
+  --diff-changed: #fff8c5;
+  --diff-none: #f6f8fa;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   color-scheme: light;
@@ -40,6 +48,14 @@
     --warning-soft: #3a2a0c;
     --error-soft: #3b1717;
     --info-soft: #232a36;
+    --config: #a78bfa;
+    --config-soft: #2a2140;
+    --diff-added: #12261b;
+    --diff-added-mark: #1f5130;
+    --diff-removed: #2d1517;
+    --diff-removed-mark: #5c2328;
+    --diff-changed: #2b2610;
+    --diff-none: #14171d;
     --shadow: none;
     color-scheme: dark;
   }
@@ -63,6 +79,14 @@
   --warning-soft: #3a2a0c;
   --error-soft: #3b1717;
   --info-soft: #232a36;
+  --config: #a78bfa;
+  --config-soft: #2a2140;
+  --diff-added: #12261b;
+  --diff-added-mark: #1f5130;
+  --diff-removed: #2d1517;
+  --diff-removed-mark: #5c2328;
+  --diff-changed: #2b2610;
+  --diff-none: #14171d;
   --shadow: none;
   color-scheme: dark;
 }
@@ -1831,6 +1855,196 @@ tr.carrier-row > td {
 .k-change {
   fill: var(--edge);
   background: var(--edge);
+}
+
+.k-config {
+  fill: var(--config);
+  background: var(--config);
+}
+
+/* A commit, or a change put down to one. */
+.tag-config {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--config-soft);
+  color: var(--config);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+
+.segmented button.on .tag-config {
+  background: rgb(255 255 255 / 85%);
+}
+
+ul.changes li.config {
+  box-shadow: inset 3px 0 0 var(--config);
+}
+
+ul.changes .diff-link {
+  margin-left: 6px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- config diff */
+
+.config-diff {
+  margin: 4px 0 2px;
+}
+
+.config-diff-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+}
+
+.config-diff-head .chip {
+  margin: 0;
+}
+
+.config-diff-head .counts {
+  display: inline-flex;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.c-added {
+  color: var(--ok);
+}
+
+.c-removed {
+  color: var(--error);
+}
+
+.c-changed {
+  color: var(--warning);
+}
+
+.config-diff-head .whole {
+  margin-left: auto;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.config-diff-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+table.split-diff {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+table.split-diff col.n {
+  width: 44px;
+}
+
+table.split-diff thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  padding: 3px 8px;
+  text-align: left;
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  z-index: 1;
+}
+
+table.split-diff td {
+  padding: 0 8px;
+  vertical-align: top;
+}
+
+table.split-diff td.n {
+  color: var(--muted);
+  text-align: right;
+  user-select: none;
+  padding: 0 6px;
+}
+
+table.split-diff td.line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* The right half starts at its line number. */
+table.split-diff tr td:nth-child(3) {
+  border-left: 1px solid var(--line);
+}
+
+table.split-diff .sign {
+  display: inline-block;
+  width: 1.2em;
+  margin-left: -0.3em;
+  color: var(--muted);
+  user-select: none;
+}
+
+table.split-diff tr.removed td:nth-child(-n + 2) {
+  background: var(--diff-removed);
+}
+
+table.split-diff tr.added td:nth-child(n + 3) {
+  background: var(--diff-added);
+}
+
+/* A leaf whose value changed: the row in amber, and only what differs marked. */
+table.split-diff tr.changed td {
+  background: var(--diff-changed);
+}
+
+table.split-diff tr.changed td.n {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
+table.split-diff td.line.none {
+  background: repeating-linear-gradient(-45deg, var(--diff-none), var(--diff-none) 4px, transparent 4px, transparent 8px) !important;
+}
+
+table.split-diff mark {
+  color: inherit;
+  border-radius: 2px;
+}
+
+table.split-diff mark.gone {
+  background: var(--diff-removed-mark);
+}
+
+table.split-diff mark.came {
+  background: var(--diff-added-mark);
+}
+
+table.split-diff tr.skip td {
+  background: var(--panel-2);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+  font-family: var(--mono);
+}
+
+table.split-diff tr.skip td:hover {
+  color: var(--accent);
 }
 
 

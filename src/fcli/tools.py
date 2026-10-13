@@ -299,6 +299,8 @@ def _change(c: dict[str, Any]) -> dict[str, Any]:
         out["record"] = before
     if c.get("cause"):
         out["cause"] = c["cause"]
+    if c.get("origin"):
+        out["origin"] = c["origin"]
     return out
 
 
@@ -317,6 +319,36 @@ async def get_drift(service: Service, args: _DriftInput) -> Any:
     what came, went and changed since - the end result, not every step in between."""
     answer = await service.drift(args.since, args.until, args.reports, args.nodes)
     return {**answer, "changes": [_change(c) for c in answer["changes"]]}
+
+
+class _ConfigDiffInput(_Input):
+    node: str = Field(description="The node whose configuration changed.")
+    commit: int | None = Field(
+        default=None,
+        description="The commit id (from config-commits or a change's cause); omit for the latest.",
+    )
+    base: int | None = Field(
+        default=None, description="Compare with the configuration after this commit, not the one before."
+    )
+    limit: int = Field(default=200, ge=1, le=2000, description="At most this many changed lines.")
+
+
+@tool("get_config_diff", _ConfigDiffInput)
+async def get_config_diff(service: Service, args: _ConfigDiffInput) -> Any:
+    """What a configuration commit changed on a node, as SR Linux 'set /' lines: '+' added,
+    '-' removed, '~' a leaf whose value changed (old -> new). Secrets are redacted to digests.
+    'commits' lists every commit the diff spans."""
+    answer = await service.config_diff(args.node, args.commit, args.base, context=0)
+    lines = []
+    for row in answer.pop("rows"):
+        left, right = (row.get("left") or {}).get("text"), (row.get("right") or {}).get("text")
+        if row["kind"] == "added":
+            lines.append(f"+ {right}")
+        elif row["kind"] == "removed":
+            lines.append(f"- {left}")
+        elif row["kind"] == "changed":
+            lines.append(f"~ {left} -> {right}")
+    return {**answer, **_limited(lines, args.limit)}
 
 
 @tool("list_baselines", _NoInput)

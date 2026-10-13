@@ -351,6 +351,22 @@ def create_app(
                 raise _Error(404, f"no baseline {name!r}")
         return await service.baselines()
 
+    async def configs(request: Request) -> Any:
+        return await service.configs(query_list(request, "node"))
+
+    async def config_diff(request: Request) -> Any:
+        query = request.query_params
+        node = query.get("node", "")
+        if not node:
+            raise _Error(400, "a configuration diff needs node=<node>")
+        try:
+            commit = int(query["commit"]) if query.get("commit") else None
+            base = int(query["base"]) if query.get("base") else None
+            context = int(query.get("context", "3"))
+        except ValueError as exc:
+            raise _Error(400, f"commit, base and context are numbers: {exc}") from exc
+        return await service.config_diff(node, commit, base, context)
+
     async def events(request: Request) -> Response:
         reports_wanted = set(query_list(request, "report"))
         nodes_wanted = set(query_list(request, "node"))
@@ -361,6 +377,8 @@ def create_app(
                 return True
             if event["type"] == "node":
                 return not nodes_wanted or event["name"] in nodes_wanted
+            if event["type"] == "config":
+                return not nodes_wanted or event["node"] in nodes_wanted
             if reports_wanted and event["report"] not in reports_wanted:
                 return False
             return not nodes_wanted or event["node"] in nodes_wanted
@@ -510,6 +528,8 @@ def create_app(
         Route("/api/acks", handled(acknowledgements), methods=["GET", "POST", "DELETE"]),
         Route("/api/history", handled(history)),
         Route("/api/drift", handled(drift)),
+        Route("/api/configs", handled(configs)),
+        Route("/api/configs/diff", handled(config_diff)),
         Route("/api/baselines", handled(baselines), methods=["GET", "POST"]),
         Route("/api/baselines/{name}", handled(baselines), methods=["DELETE"]),
         Route("/api/events", handled(events)),
