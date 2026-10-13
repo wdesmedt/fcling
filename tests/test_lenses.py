@@ -11,6 +11,7 @@ from fcli.lens import LensError
 from fcli.lenses import LENSES
 from fcli.reports.instances import NiInterface
 from fcli.reports.layer2 import VxlanInterface
+from fcli.reports.services import Port
 from fcli.topology import build
 
 from . import lens_fabric
@@ -251,3 +252,38 @@ def test_a_client_without_an_lldp_name_is_named_by_its_segment_or_port() -> None
     labels = sorted(c["label"] for c in build(dataclasses.replace(fabric(), records=records))["clients"])
     assert labels == ["ES-A", "leaf3 ethernet-1/1"]
     assert sorted(c["label"] for c in build(fabric())["clients"]) == ["hostA", "leaf3 ethernet-1/1"]
+
+
+def test_topology_carries_rates_and_services_for_the_overlays() -> None:
+    from fcli.reports.interfaces import InterfaceStats
+
+    records = lens_fabric.records()
+    records["ifstats"] = [
+        InterfaceStats(node="leaf1", name="ethernet-1/49", out_kbps=2500.0, in_kbps=100.0),
+        InterfaceStats(node="spine1", name="ethernet-1/1", out_kbps=100.0, in_kbps=2500.0),
+        InterfaceStats(node="leaf1", name="lag1", out_kbps=40.0, in_kbps=7.0),
+    ]
+    graph = build(dataclasses.replace(fabric(), records=records))
+    (cable,) = next(x for x in graph["links"] if x["a"] == "leaf1")["cables"]
+    assert (cable["a_out_bps"], cable["b_out_bps"]) == (2_500_000.0, 100_000.0)
+    # No sample yet is no rate, not zero.
+    (other,) = next(x for x in graph["links"] if x["a"] == "leaf2")["cables"]
+    assert other["a_out_bps"] is None
+    host_a = next(c for c in graph["clients"] if c["name"] == "hostA")
+    on_leaf1 = next(a for a in host_a["attachments"] if a["node"] == "leaf1")
+    assert (on_leaf1["out_bps"], on_leaf1["in_bps"]) == (40_000.0, 7_000.0)
+    services = {n["name"]: n["services"] for n in graph["nodes"]}
+    assert services["leaf1"] == ["ipvrf-1", "macvrf-1"] and services["spine1"] == []
+
+
+def test_an_uplink_whose_neighbour_went_quiet_is_no_client() -> None:
+    records = lens_fabric.records()
+    records["lldp"] = [n for n in records["lldp"] if "leaf3" not in (n.node, n.system_name)]
+    records["services"] = [
+        s.model_copy(update={"ports": (*s.ports, Port(name="ethernet-1/49.0", kind="routed"))})
+        if (s.node, s.name) == ("leaf3", "default")
+        else s
+        for s in records["services"]
+    ]
+    graph = build(dataclasses.replace(fabric(), records=records))
+    assert not [c for c in graph["clients"] if "ethernet-1/49" in c["label"]]

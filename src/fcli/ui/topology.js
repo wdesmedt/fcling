@@ -94,15 +94,58 @@ export function layout(graph) {
   return { nodes, clients, labels, titles, width, height: y };
 }
 
+/** A cable's path, and its two halves - each from one end to the middle - to colour by what that end sends. */
 function linkPath(a, b) {
   if (Math.abs(a.y - b.y) < 1) {
     const top = a.y - NODE.h / 2;
     const lift = 36 + Math.abs(a.x - b.x) * 0.12;
-    return `M${a.x},${top} Q${(a.x + b.x) / 2},${top - lift} ${b.x},${top}`;
+    const c = { x: (a.x + b.x) / 2, y: top - lift };
+    // The curve's middle, and each half as a curve of its own (de Casteljau at t = 0.5).
+    const m = { x: (a.x + 2 * c.x + b.x) / 4, y: (top + 2 * c.y + top) / 4 };
+    const half = (p) => `M${p.x},${top} Q${(p.x + c.x) / 2},${(top + c.y) / 2} ${m.x},${m.y}`;
+    return { d: `M${a.x},${top} Q${c.x},${c.y} ${b.x},${top}`, halves: [half(a), half(b)], mid: m };
   }
-  const [up, down] = a.y < b.y ? [a, b] : [b, a];
-  return `M${up.x},${up.y + NODE.h / 2} L${down.x},${down.y - NODE.h / 2}`;
+  const end = (p, q) => ({ x: p.x, y: p.y + (p.y < q.y ? NODE.h / 2 : -NODE.h / 2) });
+  const pa = end(a, b);
+  const pb = end(b, a);
+  const m = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+  return {
+    d: `M${pa.x},${pa.y} L${pb.x},${pb.y}`,
+    halves: [`M${pa.x},${pa.y} L${m.x},${m.y}`, `M${pb.x},${pb.y} L${m.x},${m.y}`],
+    mid: m,
+  };
 }
+
+// --------------------------------------------------------------------------- traffic
+
+export const RATE_UNITS = [
+  ["Kbps", 1e3],
+  ["Mbps", 1e6],
+  ["Gbps", 1e9],
+];
+/** Where a cable's colour steps up, as a share of the configured link rate. */
+export const HEAT_STEPS = [0.25, 0.5, 0.75];
+
+export function formatBps(bps) {
+  if (bps === null || bps === undefined) return "no rate yet";
+  const [unit, scale] = [...RATE_UNITS].reverse().find(([, s]) => bps >= s) ?? ["bps", 1];
+  const n = bps / scale;
+  return `${n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2)} ${unit}`;
+}
+
+/** The colour class of a rate against the link rate: bw-1 (under 25%) to bw-4 (75% and up). */
+export function heat(bps, rate) {
+  if (bps === null || bps === undefined || !(rate > 0)) return "bw-none";
+  const share = bps / rate;
+  return `bw-${1 + HEAT_STEPS.filter((s) => share >= s).length}`;
+}
+
+const most = (values) => {
+  const known = values.filter((v) => v !== null && v !== undefined);
+  return known.length ? Math.max(...known) : null;
+};
+
+const share = (bps, rate) => (bps !== null && rate > 0 ? ` (${Math.round((bps / rate) * 100)}%)` : "");
 
 const hasTrouble = (counts) => (counts?.error ? "error" : counts?.warning ? "warning" : "");
 
@@ -135,7 +178,18 @@ function useViewport(box, width, height) {
  * `{nodes, links, clients}` as Sets (links as "a|b", sorted), `tunnels` as [{from, to, label}],
  * and `marks` as Map(node -> text) shown above a node.
  */
-export function Topology({ graph, status, checks, selected, onSelect, overlay = null, legend = true }) {
+export function Topology({
+  graph,
+  status,
+  checks,
+  selected,
+  onSelect,
+  overlay = null,
+  legend = true,
+  paint = { mode: "health", rate: 0 },
+  controls = null,
+}) {
+  const traffic = paint.mode === "traffic";
   const box = useRef(null);
   const placed = useMemo(() => layout(graph), [graph]);
   const { view, setView, fit } = useViewport(box, placed.width, placed.height);
@@ -221,7 +275,9 @@ export function Topology({ graph, status, checks, selected, onSelect, overlay = 
               .filter((n) => placed.nodes.has(n))
               .map((n) => {
                 const p = placed.nodes.get(n);
-                return html`<line class=${`attach${dim(`c:${c.id}`)}`} x1=${at.x} y1=${at.y - CLIENT.h / 2}
+                const here = c.attachments.filter((x) => x.node === n);
+                const sends = traffic ? most(here.map((x) => x.out_bps)) : null;
+                return html`<line class=${`attach${traffic ? ` ${heat(sends, paint.rate)}` : ""}${dim(`c:${c.id}`)}`} x1=${at.x} y1=${at.y - CLIENT.h / 2}
                                   x2=${p.x} y2=${p.y + NODE.h / 2} />`;
               });
           })}
@@ -230,16 +286,24 @@ export function Topology({ graph, status, checks, selected, onSelect, overlay = 
             const b = placed.nodes.get(l.b);
             if (!a || !b) return null;
             const id = `${l.a}|${l.b}`;
-            const d = linkPath(a, b);
-            const trouble = hasTrouble(l.findings);
+            const { d, halves, mid } = linkPath(a, b);
             const sel = selected?.type === "link" && selected.id === id ? " selected" : "";
+            // Traffic: each half by what its end sends - the busiest of parallel cables. A cable not
+            // carrying (down, lost, unknown) keeps its state's look whatever is drawn.
+            const carrying = l.state === "up" || l.state === "mixed";
+            const sends = [most(l.cables.map((c) => c.a_out_bps)), most(l.cables.map((c) => c.b_out_bps))];
+            const trouble = traffic ? "" : hasTrouble(l.findings);
+            const title = traffic && carrying
+              ? `${l.a} → ${l.b}: ${formatBps(sends[0])}${share(sends[0], paint.rate)}\n${l.b} → ${l.a}: ${formatBps(sends[1])}${share(sends[1], paint.rate)}`
+              : `${l.a} ↔ ${l.b}: ${l.count} cable${l.count > 1 ? "s" : ""}, ${l.state || "state unknown"}`;
             return html`<g class=${`link state-${l.state || "unknown"} ${trouble}${sel}${dim(`l:${id}`)}${traced(`l:${id}`)}`}
                            onClick=${pick({ type: "link", id })} onPointerDown=${(e) => e.stopPropagation()}>
               <path class="hit" d=${d} />
-              <path class="wire" d=${d} />
-              ${l.count > 1 &&
-              html`<text class="count" x=${(a.x + b.x) / 2} y=${(a.y + b.y) / 2}>×${l.count}</text>`}
-              <title>${l.a} ↔ ${l.b}: ${l.count} cable${l.count > 1 ? "s" : ""}, ${l.state || "state unknown"}</title>
+              ${traffic && carrying
+                ? halves.map((h, i) => html`<path class=${`wire half ${heat(sends[i], paint.rate)}`} d=${h} />`)
+                : html`<path class="wire" d=${d} />`}
+              ${l.count > 1 && html`<text class="count" x=${mid.x} y=${mid.y}>×${l.count}</text>`}
+              <title>${title}</title>
             </g>`;
           })}
           ${(overlay?.tunnels ?? []).map((t) => {
@@ -312,12 +376,24 @@ export function Topology({ graph, status, checks, selected, onSelect, overlay = 
         <button onClick=${() => setView({ ...view, k: Math.min(4, view.k * 1.25) })} title="Zoom in">+</button>
         <button onClick=${() => setView({ ...view, k: Math.max(0.15, view.k / 1.25) })} title="Zoom out">−</button>
       </div>
-      ${legend && html`<${Legend} />`}
+      ${controls && html`<div class="map-controls" onPointerDown=${(e) => e.stopPropagation()}>${controls}</div>`}
+      ${legend && html`<${Legend} paint=${paint} />`}
     </div>
   `;
 }
 
-function Legend() {
+function Legend({ paint }) {
+  if (paint.mode === "traffic") {
+    const bound = (s) => formatBps(paint.rate * s);
+    return html`<div class="legend">
+      <span><i class="ln bw-1"></i>under ${bound(HEAT_STEPS[0])}</span>
+      <span><i class="ln bw-2"></i>${bound(HEAT_STEPS[0])}–${bound(HEAT_STEPS[1])}</span>
+      <span><i class="ln bw-3"></i>${bound(HEAT_STEPS[1])}–${bound(HEAT_STEPS[2])}</span>
+      <span><i class="ln bw-4"></i>over ${bound(HEAT_STEPS[2])}</span>
+      <span><i class="ln bw-none"></i>no rate yet</span>
+      <span class="muted">each half: what its end sends</span>
+    </div>`;
+  }
   return html`<div class="legend">
     <span><i class="sw ok"></i>healthy</span>
     <span><i class="sw warning"></i>warning</span>
@@ -442,10 +518,12 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
     return html`<div class="details">
       <h2><a onClick=${() => onSelect({ type: "node", id: l.a })}>${l.a}</a> ↔ <a onClick=${() => onSelect({ type: "node", id: l.b })}>${l.b}</a></h2>
       <table class="grid">
-        <thead><tr><th>${l.a}</th><th>${l.b}</th><th>state</th></tr></thead>
+        <thead><tr><th>${l.a}</th><th>${l.b}</th><th>state</th><th>→ ${l.b}</th><th>→ ${l.a}</th></tr></thead>
         <tbody>${l.cables.map(
           (c) => html`<tr><td class="mono">${c.a_port}</td><td class="mono">${c.b_port}</td>
-            <td><span class=${`pill state-${c.state}`}>${c.state || "?"}</span></td></tr>`,
+            <td><span class=${`pill state-${c.state}`}>${c.state || "?"}</span></td>
+            <td class="rate">${c.a_out_bps === null ? "—" : formatBps(c.a_out_bps)}</td>
+            <td class="rate">${c.b_out_bps === null ? "—" : formatBps(c.b_out_bps)}</td></tr>`,
         )}</tbody>
       </table>
       ${l.state === "lost" && html`<p class="muted">LLDP no longer reports this cable; the history saw it.</p>`}
@@ -464,13 +542,89 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
       <dt>services</dt><dd>${[...new Set(c.attachments.map((a) => a.service))].sort(natural).join(", ")}</dd>
     </dl>
     <table class="grid">
-      <thead><tr><th>node</th><th>subinterface</th><th>service</th><th>vlan</th></tr></thead>
+      <thead><tr><th>node</th><th>subinterface</th><th>service</th><th>vlan</th><th>to it</th><th>from it</th></tr></thead>
       <tbody>${[...c.attachments]
         .sort((a, b) => natural(a.node, b.node) || natural(a.subinterface, b.subinterface))
         .map(
           (a) => html`<tr><td><a onClick=${() => onSelect({ type: "node", id: a.node })}>${a.node}</a></td>
-            <td class="mono">${a.subinterface}</td><td>${a.service}</td><td>${a.vlan ?? ""}</td></tr>`,
+            <td class="mono">${a.subinterface}</td><td>${a.service}</td><td>${a.vlan ?? ""}</td>
+            <td class="rate">${a.out_bps === null || a.out_bps === undefined ? "—" : formatBps(a.out_bps)}</td>
+            <td class="rate">${a.in_bps === null || a.in_bps === undefined ? "—" : formatBps(a.in_bps)}</td></tr>`,
         )}</tbody>
     </table>
   </div>`;
+}
+
+// --------------------------------------------------------------------------- overlays
+
+function remembered(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function remember(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // A preference that does not stick is no loss.
+  }
+}
+
+/**
+ * What the topology is coloured by - "health", "traffic" or "service:<name>" - and the
+ * link rate traffic is scaled from: emulated nodes forward far below their port speed,
+ * so the scale is set here rather than read from the ports. Both kept in the browser.
+ */
+export function useOverlay() {
+  const [overlay, setOverlayState] = useState(() => remembered("fcli-overlay", "health"));
+  const [rate, setRateState] = useState(() => remembered("fcli-link-rate", { value: 10, unit: "Mbps" }));
+  const setOverlay = (value) => {
+    setOverlayState(value);
+    remember("fcli-overlay", value);
+  };
+  const setRate = (value) => {
+    setRateState(value);
+    remember("fcli-link-rate", value);
+  };
+  const scale = RATE_UNITS.find(([u]) => u === rate.unit)?.[1] ?? 1e6;
+  const bps = Number(rate.value) > 0 ? Number(rate.value) * scale : 0;
+  return { overlay, setOverlay, rate, setRate, bps };
+}
+
+/** A service's part of the fabric: the nodes that carry it, the cables between them, its clients. */
+export function serviceOverlay(graph, name) {
+  const nodes = new Set(graph.nodes.filter((n) => (n.services || []).includes(name)).map((n) => n.name));
+  const clients = new Set();
+  for (const c of graph.clients) {
+    const on = c.attachments.filter((a) => a.service === name);
+    if (on.length) clients.add(c.id);
+    for (const a of on) nodes.add(a.node);
+  }
+  const links = new Set(graph.links.filter((l) => nodes.has(l.a) && nodes.has(l.b)).map((l) => `${l.a}|${l.b}`));
+  return { nodes, links, clients, tunnels: [], marks: new Map() };
+}
+
+export function OverlayControls({ graph, settings }) {
+  const { overlay, setOverlay, rate, setRate } = settings;
+  const services = [...new Set(graph.nodes.flatMap((n) => n.services || []))].sort(natural);
+  return html`<label class="overlay-pick"><span>Show</span>
+      <select value=${overlay} onChange=${(e) => setOverlay(e.target.value)} aria-label="Colour the topology by">
+        <option value="health">health</option>
+        <option value="traffic">traffic</option>
+        ${services.length > 0 &&
+        html`<optgroup label="service">${services.map((s) => html`<option value=${`service:${s}`}>${s}</option>`)}</optgroup>`}
+      </select>
+    </label>
+    ${overlay === "traffic" &&
+    html`<label class="rate-pick" title="The rate a cable is full at. Emulated nodes forward far below their port speed, so this is the scale for colouring, not the Ethernet rate.">
+      <span>link rate</span>
+      <input type="number" min="0" step="any" value=${rate.value}
+             onInput=${(e) => setRate({ ...rate, value: e.target.value })} aria-label="Link rate" />
+      <select value=${rate.unit} onChange=${(e) => setRate({ ...rate, unit: e.target.value })} aria-label="Unit">
+        ${RATE_UNITS.map(([u]) => html`<option value=${u}>${u}</option>`)}
+      </select>
+    </label>`}`;
 }

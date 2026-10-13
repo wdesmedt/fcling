@@ -18,6 +18,10 @@ are no node of the inventory and face no service are **outside**.
 
 A fabric whose nodes share no cable with another is a **component** of its
 own; each is named by what its nodes' names have in common, where they do.
+
+For the overlays a drawing can show: each end of a cable, and each port a
+client hangs off, carries the rate it sends at (``ifstats``), and each node
+the services it carries.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ from .fabric import Fabric, out_of_band, parent
 from .lenses.common import Index
 
 #: What the topology reads.
-REQUIRES = ("services", "lldp", "lag", "subif", "es")
+REQUIRES = ("services", "lldp", "lag", "subif", "es", "ifstats")
 
 TIERS = ("gateway", "spine", "leaf", "core", "unclassified")
 
@@ -69,6 +73,11 @@ def _port_state(fabric: Fabric) -> dict[tuple[str, str], str]:
     return {k: v.pop() if len(v) == 1 else "mixed" for k, v in states.items()}
 
 
+def _rates(fabric: Fabric) -> dict[tuple[str, str], tuple[float, float]]:
+    """``(node, port)`` -> what it sends and receives, in bits per second: ports with two samples."""
+    return {(r.node, r.name): (r.out_kbps * 1000, r.in_kbps * 1000) for r in fabric.get("ifstats")}
+
+
 def _components(nodes: Iterable[str], links: Sequence[dict[str, Any]]) -> list[list[str]]:
     root = {n: n for n in nodes}
 
@@ -98,6 +107,11 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
     index = Index(fabric)
     tier = _tiers(fabric, index)
     ports = _port_state(fabric)
+    rates = _rates(fabric)
+
+    def out_bps(node: str, port: str) -> float | None:
+        rate = rates.get((node, port))
+        return rate[0] if rate else None
 
     # Cables, both ends of each counted once; parallel ones folded per node pair.
     pairs: dict[tuple[str, str], dict[str, Any]] = {}
@@ -117,7 +131,16 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
             state = "unknown"
         else:
             state = _worst(ports.get((x, xp), ""), ports.get((y, yp), ""))
-        link["cables"].append({"a_port": xp, "b_port": yp, "state": state})
+        link["cables"].append(
+            {
+                "a_port": xp,
+                "b_port": yp,
+                "state": state,
+                # What each end sends into the cable: the a end towards b, and back.
+                "a_out_bps": None if lost else out_bps(x, xp),
+                "b_out_bps": None if lost else out_bps(y, yp),
+            }
+        )
 
     for (node, port), far in index.cables.items():
         cable((node, port), far, lost=False)
@@ -154,6 +177,10 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
     # Clients: what the services' access ports face.
     clients: dict[str, dict[str, Any]] = {}
     for (node, ni), s in sorted(index.services.items()):
+        # Hosts hang off services: the underlay's own instance and management face no client,
+        # though a port of theirs whose neighbour has gone quiet looks like one.
+        if s.type not in ("mac-vrf", "ip-vrf") or ni == "mgmt":
+            continue
         for p in s.ports:
             port = parent(p.name)
             if (
@@ -178,6 +205,9 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
                     "vlan": p.vlan,
                     "addresses": list(p.addresses),
                     "esi": p.esi,
+                    # The port towards the client: what the node sends it, and gets from it.
+                    "out_bps": out_bps(node, port),
+                    "in_bps": rates[(node, port)][1] if (node, port) in rates else None,
                 }
             )
     # One host on a segment is one client, though LLDP is heard on only some of
@@ -228,6 +258,11 @@ def build(fabric: Fabric, findings: Sequence[Finding] = (), name: str = "") -> d
                 "unreachable": fabric.unreachable.get(n, ""),
                 "findings": _counts(by_node.get(n, [])),
                 "health": _health(by_node.get(n, [])),
+                "services": sorted(
+                    ni
+                    for (node, ni), s in index.services.items()
+                    if node == n and s.type in ("mac-vrf", "ip-vrf") and ni != "mgmt"
+                ),
             }
             for n in fabric.nodes
         ],

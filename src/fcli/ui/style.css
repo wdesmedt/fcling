@@ -1663,3 +1663,126 @@ tr.column-filters input.on {
   padding: 10px 12px;
   margin: 0;
 }
+
+/* ---------------------------------------------------------------- overlays */
+
+.map-controls {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  cursor: default;
+}
+
+.map-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.map-controls select,
+.map-controls input {
+  font-size: 13px;
+  padding: 2px 6px;
+}
+
+.map-controls input {
+  width: 70px;
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+:root {
+  --heat-1: #16a34a;
+  --heat-2: #ca8a04;
+  --heat-3: #ea580c;
+  --heat-4: #dc2626;
+}
+
+.link .wire.half {
+  stroke-width: 3.2;
+}
+
+/* Selected or pointed at, a cable drawn by traffic keeps its colours: thicker instead. */
+.link:hover .wire.half,
+.link.selected .wire.half {
+  stroke-width: 5.5;
+}
+
+.link .wire.bw-1,
+.attach.bw-1 {
+  stroke: var(--heat-1);
+}
+
+.link .wire.bw-2,
+.attach.bw-2 {
+  stroke: var(--heat-2);
+}
+
+.link .wire.bw-3,
+.attach.bw-3 {
+  stroke: var(--heat-3);
+}
+
+.link .wire.bw-4,
+.attach.bw-4 {
+  stroke: var(--heat-4);
+}
+
+.link .wire.bw-none {
+  stroke: var(--edge);
+  stroke-dasharray: 2 3;
+}
+
+.attach.bw-1,
+.attach.bw-2,
+.attach.bw-3,
+.attach.bw-4 {
+  stroke-width: 2.2;
+}
+
+.ln.bw-1,
+.ln.bw-2,
+.ln.bw-3,
+.ln.bw-4,
+.ln.bw-none {
+  border-top: 3px solid;
+}
+
+.ln.bw-1 {
+  border-color: var(--heat-1);
+}
+
+.ln.bw-2 {
+  border-color: var(--heat-2);
+}
+
+.ln.bw-3 {
+  border-color: var(--heat-3);
+}
+
+.ln.bw-4 {
+  border-color: var(--heat-4);
+}
+
+.ln.bw-none {
+  border-top: 3px dotted var(--edge);
+}
+
+td.rate {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

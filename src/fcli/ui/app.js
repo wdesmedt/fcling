@@ -1,6 +1,6 @@
 // fcli's web UI: the shell - routing, the header, the navigation panel, the agent - around the views.
 
-import { html, render, useEffect, useRef, useState } from "./vendor/preact-htm.module.js";
+import { html, render, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
 import { follow, get, hashQuery } from "./api.js";
 import { ChatPanel } from "./chat.js";
 import { HistoryView } from "./history.js";
@@ -8,12 +8,14 @@ import { Incidents } from "./incidents.js";
 import { EndpointsView, LENS_VIEWS, PathView, ServiceView, WhereView } from "./lenses.js";
 import { Nav } from "./nav.js";
 import { ReportView } from "./reports.js";
-import { Details, Topology } from "./topology.js";
+import { Details, OverlayControls, Topology, serviceOverlay, useOverlay } from "./topology.js";
 
 /** Reports whose changes can change the topology or the incidents; the rest would only wake them up. */
 const WATCHED = ["checks", "lldp", "subif", "services", "es", "lag"];
 /** Changes come in bursts: refresh once they settle, not once per change. */
 const SETTLE_MS = 1500;
+/** Rates change on every poll and are no history, so no event says so: traffic is fetched this often. */
+const TRAFFIC_MS = 10_000;
 
 function parseHash() {
   const [path] = location.hash.replace(/^#\/?/, "").split("?");
@@ -134,6 +136,14 @@ function App() {
   const atRef = useRef(at);
   atRef.current = at;
   const pending = useRef(null);
+  const overlaySettings = useOverlay();
+  const service = overlaySettings.overlay.startsWith("service:") ? overlaySettings.overlay.slice(8) : null;
+  const traffic = overlaySettings.overlay === "traffic";
+  const paint = { mode: traffic ? "traffic" : "health", rate: overlaySettings.bps };
+  const picked = useMemo(
+    () => (service && data ? serviceOverlay(data.topology, service) : null),
+    [service, data],
+  );
 
   const load = async (when = atRef.current) => {
     try {
@@ -188,6 +198,13 @@ function App() {
     };
   }, []);
 
+  // Drawn by traffic, live: the rates move on every poll.
+  useEffect(() => {
+    if (!traffic || at || route.view !== "topology") return;
+    const timer = setInterval(() => load(), TRAFFIC_MS);
+    return () => clearInterval(timer);
+  }, [traffic, at, route.view]);
+
   // A narrow screen's navigation closes once a view is picked.
   useEffect(() => setNavOpen(false), [location.hash]);
 
@@ -207,7 +224,9 @@ function App() {
     page = html`<main class="loading">${error ? "" : "Reading the fabric…"}</main>`;
   } else if (route.view === "topology") {
     page = html`<main class="split">
-      <${Topology} graph=${data.topology} status=${status} checks=${data.checks} selected=${route.selection} onSelect=${select} />
+      <${Topology} graph=${data.topology} status=${status} checks=${data.checks} selected=${route.selection} onSelect=${select}
+                   paint=${paint} overlay=${picked?.nodes.size ? picked : null}
+                   controls=${html`<${OverlayControls} graph=${data.topology} settings=${overlaySettings} />`} />
       <aside class="details-pane"><${Details} selection=${route.selection} graph=${data.topology} status=${status}
                                               checks=${data.checks} at=${at} onSelect=${select} /></aside>
     </main>`;
