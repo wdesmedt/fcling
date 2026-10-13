@@ -250,7 +250,11 @@ def test_the_ui_is_served_and_needs_no_token(target: FakeTarget, tmp_path: Path)
         assets = [p.relative_to(UI).as_posix() for p in UI.rglob("*") if p.is_file()]
         assert "vendor/preact-htm.module.js" in assets
         for asset in assets:
-            assert client.get(f"/ui/{asset}").status_code == 200, asset
+            served = client.get(f"/ui/{asset}")
+            assert served.status_code == 200, asset
+            assert served.headers["cache-control"] == "no-cache", asset
+        etag = client.get("/ui/app.js").headers["etag"]
+        assert client.get("/ui/app.js", headers={"if-none-match": etag}).status_code == 304
         assert client.get("/ui/nope.js").status_code == 404
         # The data still needs the token.
         assert client.get("/api/topology").status_code == 401

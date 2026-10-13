@@ -72,6 +72,16 @@ class _Error(Exception):
         self.status = status
 
 
+class _Revalidated(StaticFiles):
+    """The UI is ES modules with no build step and no hashed names: a browser
+    using a cached copy without asking runs the old code after an upgrade."""
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["cache-control"] = "no-cache"
+        return response
+
+
 class _Auth:
     """Plain ASGI, so a streamed response passes through untouched."""
 
@@ -397,7 +407,7 @@ def create_app(
         Route("/api/topology", handled(topology)),
         Route("/api/chat", handled(chat), methods=["POST"]),
         Route("/", lambda request: FileResponse(UI / "index.html", headers={"cache-control": "no-cache"})),
-        Mount("/ui", StaticFiles(directory=UI)),
+        Mount("/ui", _Revalidated(directory=UI)),
     ]
     if mcp_manager is not None:
         from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
