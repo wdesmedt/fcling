@@ -6,7 +6,7 @@ whole ``/network-instance`` subtree, which also carries every BGP RIB.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
@@ -43,6 +43,12 @@ class BgpVpnInstance(BaseModel):
     import_rts: tuple[str, ...] = ()
     export_rts: tuple[str, ...] = ()
     rd: str = ""
+
+
+def stitched(vpn: Iterable[BgpVpnInstance]) -> bool:
+    """Two bgp-vpn instances that carry route-targets: a gateway's DC side and its
+    WAN side. An instance with no targets advertises nothing, and stitches nothing."""
+    return sum(1 for inst in vpn if inst.import_rts or inst.export_rts) > 1
 
 
 class Instance(BaseModel):

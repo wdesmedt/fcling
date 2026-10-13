@@ -1,17 +1,21 @@
 // A table of rows as the server renders them: filtered, sorted, and capped so a big RIB stays quick.
 
-import { html, useMemo, useState } from "./vendor/preact-htm.module.js";
+import { html, useEffect, useMemo, useState } from "./vendor/preact-htm.module.js";
 import { natural } from "./api.js";
 
 const PAGE = 500;
 
 /**
  * A column filter as a test of one cell: `text` contains, `!text` does not,
- * `=text` is exactly, `>10` `>=10` `<10` `<=10` compare numbers. Case does not matter.
+ * `=text` is exactly, `>10` `>=10` `<10` `<=10` compare numbers, `a|b` either. Case does not matter.
  */
 export function cellTest(expression) {
   const text = expression.trim().toLowerCase();
   if (!text) return null;
+  if (text.includes("|")) {
+    const any = text.split("|").map(cellTest).filter(Boolean);
+    return any.length ? (cell) => any.some((test) => test(cell)) : null;
+  }
   const compare = /^(>=|<=|>|<)\s*(-?[\d.]+)$/.exec(text);
   if (compare) {
     const [, op, value] = compare;
@@ -31,6 +35,63 @@ export function cellTest(expression) {
     return (cell) => String(cell).toLowerCase() === exact;
   }
   return (cell) => String(cell).toLowerCase().includes(text);
+}
+
+const MIN_WIDTH = 40;
+
+/**
+ * Column widths the user dragged, kept per set of columns; `null` until then, and the
+ * table sizes itself. The first drag fixes every column at the width it has.
+ */
+function useWidths(columns) {
+  const key = `fcli-widths:${columns.join("|")}`;
+  const load = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key));
+      return Array.isArray(saved) && saved.length === columns.length ? saved : null;
+    } catch {
+      return null;
+    }
+  };
+  const [widths, setWidths] = useState(load);
+  useEffect(() => setWidths(load()), [key]);
+  const save = (next) => {
+    setWidths(next);
+    try {
+      if (next) localStorage.setItem(key, JSON.stringify(next));
+      else localStorage.removeItem(key);
+    } catch {
+      // Storage may be blocked: the widths then last as long as the page.
+    }
+  };
+  const resize = (e, i) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const headers = [...e.currentTarget.closest("tr").children];
+    const start = widths ?? headers.map((th) => th.getBoundingClientRect().width);
+    const x = e.clientX;
+    const handle = e.currentTarget;
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch {
+      // No pointer to capture (a synthetic event): the moves still reach the handle.
+    }
+    let next = start;
+    const move = (m) => {
+      next = start.map((w, j) => (j === i ? Math.max(MIN_WIDTH, Math.round(w + m.clientX - x)) : Math.round(w)));
+      setWidths(next);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      save(next);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+  return [widths, resize, () => save(null)];
 }
 
 /**
@@ -90,6 +151,7 @@ export function DataTable({
     setByColumn(next);
   };
   const filtering = tests.length > 0 || filter.trim();
+  const [widths, resize, resetWidths] = useWidths(columns);
 
   // A node's rows are one group unless sorted otherwise: the node is written once per group.
   const grouped = !sort && !ordered;
@@ -104,17 +166,25 @@ export function DataTable({
         setByColumn({});
       }}>Clear filters</button>`}
       <span class="muted small hint" title="text: contains · !text: does not · =text: exactly · >10, <=5: numbers">
-        Column filters: text, !text, =text, ${">10"}
+        Column filters: text, !text, =text, ${">10"}, a|b
       </span>
     </div>
     ${rows.length === 0
       ? html`<p class="muted">${empty}</p>`
       : html`<div class="table-scroll">
-          <table class="grid report">
+          <table class=${`grid report${widths ? " sized" : ""}`}
+                 style=${widths ? { width: `${widths.reduce((a, b) => a + b, 0)}px` } : null}>
+            ${widths && html`<colgroup>${widths.map((w) => html`<col style=${{ width: `${w}px` }} />`)}</colgroup>`}
             <thead>
               <tr>${columns.map(
                 (c, i) => html`<th onClick=${() => sortBy(i)} class=${sort?.column === i ? "sorted" : ""}>
-                  ${c}${sort?.column === i ? (sort.descending ? " ▾" : " ▴") : ""}</th>`,
+                  ${c}${sort?.column === i ? (sort.descending ? " ▾" : " ▴") : ""}
+                  <span class="col-resize" title="Drag to resize; double-click to fit the columns again"
+                        onClick=${(e) => e.stopPropagation()} onPointerDown=${(e) => resize(e, i)}
+                        onDblClick=${(e) => {
+                          e.stopPropagation();
+                          resetWidths();
+                        }}></span></th>`,
               )}</tr>
               <tr class="column-filters">${columns.map(
                 (c) => html`<th><input value=${byColumn[c] ?? ""} class=${byColumn[c] ? "on" : ""}

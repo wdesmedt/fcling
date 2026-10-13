@@ -927,11 +927,17 @@ def _lens_command(spec: Any) -> click.Command:
 
     # Click lists the parameters in the reverse of the order they are added.
     for arg in reversed(spec.args):
-        if arg.required:
-            run = click.argument(arg.name.upper().replace("-", "_"), metavar=arg.name.upper())(run)
+        if arg.required or arg.positional:
+            metavar = arg.name.upper() if arg.required else f"[{arg.name.upper()}]"
+            run = click.argument(arg.name.upper().replace("-", "_"), metavar=metavar, required=arg.required)(
+                run
+            )
         else:
             run = click.option(f"--{arg.name}", arg.name, help=arg.help)(run)
-    args = " ".join(a.name.upper() if a.required else f"[--{a.name}]" for a in spec.args)
+    args = " ".join(
+        a.name.upper() if a.required else f"[{a.name.upper()}]" if a.positional else f"[--{a.name}]"
+        for a in spec.args
+    )
     return click.command(spec.name, help=f"{spec.help}\n\n{args}" if args else spec.help)(run)
 
 

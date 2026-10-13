@@ -383,9 +383,11 @@ class _ServiceInput(_Input):
 
 @tool("service_detail", _ServiceInput)
 async def service_detail(service: Service, args: _ServiceInput) -> Any:
-    """One service (a mac-vrf or ip-vrf) as every node carrying it sees it: state, EVI, VNI, route
+    """A service (a mac-vrf or ip-vrf) as every node carrying it sees it: state, EVI, VNI, route
     targets, ports, MACs learned, and the inconsistencies between nodes - mismatched VNI or route
-    targets, designated-forwarder problems."""
+    targets, designated-forwarder problems. Each node's site comes from the underlay, and ``group``
+    tells the services apart that reuse one name in several sites; ``dci`` marks a group that
+    gateways stitch across sites, with ``wan`` their WAN-side bgp-vpn instances."""
     return await _lens(service, "service", {"name": args.name}, args.at, 500)
 
 

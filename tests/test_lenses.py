@@ -7,11 +7,14 @@ import json
 
 import pytest
 
+from fcli.fabric import Fabric
+from fcli.inventory import Node
 from fcli.lens import LensError
 from fcli.lenses import LENSES
-from fcli.reports.instances import NiInterface
+from fcli.reports.instances import BgpVpnInstance, NiInterface, stitched
 from fcli.reports.layer2 import VxlanInterface
-from fcli.reports.services import Port
+from fcli.reports.routing import Route
+from fcli.reports.services import Port, Service
 from fcli.topology import build
 
 from . import lens_fabric
@@ -153,6 +156,58 @@ def test_service_shows_every_node_and_what_disagrees() -> None:
     split = dataclasses.replace(fabric(), records=records)
     issues = {r.node: r.issues for r in LENSES["service"].run(split, name="macvrf-1")}
     assert "VNI 101" in issues["leaf3"][0]
+
+
+def _two_sites() -> Fabric:
+    """Two sites that reuse names and route-targets, each with a leaf and a gateway.
+
+    mv-dci is stitched across them on the gateways' WAN side, 65000:1; mv-local
+    is in both with the same target, but no gateway carries it: two services.
+    """
+    loopback = {"leafA": "10.0.1.1", "gwA": "10.0.1.9", "leafB": "10.0.2.1", "gwB": "10.0.2.9"}
+    site = {"leafA": "A", "gwA": "A", "leafB": "B", "gwB": "B"}
+    dc, wan = BgpVpnInstance(id=1, import_rts=("1:1",)), BgpVpnInstance(id=2, import_rts=("65000:1",))
+    carried = {
+        "leafA": {"mv-dci": (dc,), "mv-local": (BgpVpnInstance(id=1, import_rts=("9:9",)),)},
+        "leafB": {"mv-dci": (dc,), "mv-local": (BgpVpnInstance(id=1, import_rts=("9:9",)),)},
+        "gwA": {"mv-dci": (dc, wan)},
+        "gwB": {"mv-dci": (dc, wan)},
+    }
+    ni, routes, services = [], [], []
+    for node, address in loopback.items():
+        ni.append(NiInterface(node=node, ni="default", interface="system0.0", prefixes=(f"{address}/32",)))
+        for other, theirs in loopback.items():
+            # The gateways learn each other's loopbacks over the WAN; the leaves only their own site's.
+            if site[other] == site[node] or (node.startswith("gw") and other.startswith("gw")):
+                routes.append(Route(node=node, ni="default", prefix=f"{theirs}/32", type="bgp", active=True))
+        for name, vpn in carried[node].items():
+            ni.append(NiInterface(node=node, ni=name, type="mac-vrf", interface="vxlan1.1", vpn=vpn))
+            services.append(
+                Service(node=node, name=name, type="mac-vrf", oper="up", vpn=vpn, gateway=stitched(vpn))
+            )
+    records = {"ni": ni, "ipv4-rib": routes, "ipv6-rib": [], "services": services}
+    return Fabric.of([Node(n, n) for n in loopback], records)
+
+
+def test_sites_come_from_the_underlay_and_gateways_stitch_them() -> None:
+    rows = LENSES["service"].run(_two_sites())
+    found = {(r.node, r.name): (r.site, r.group, r.dci, r.wan) for r in rows}
+    assert found == {
+        ("gwA", "mv-dci"): ("site 1", "mv-dci|dci", "L2 DCI", (2,)),
+        ("leafA", "mv-dci"): ("site 1", "mv-dci|dci", "L2 DCI", ()),
+        ("gwB", "mv-dci"): ("site 2", "mv-dci|dci", "L2 DCI", (2,)),
+        ("leafB", "mv-dci"): ("site 2", "mv-dci|dci", "L2 DCI", ()),
+        ("leafA", "mv-local"): ("site 1", "mv-local|site 1", "", ()),
+        ("leafB", "mv-local"): ("site 2", "mv-local|site 2", "", ()),
+    }
+    # One name, the services it is part of: both sites' mv-local.
+    named = LENSES["service"].run(_two_sites(), name="mv-local")
+    assert sorted(r.group for r in named) == ["mv-local|site 1", "mv-local|site 2"]
+
+
+def test_an_instance_without_targets_makes_no_gateway() -> None:
+    assert not stitched((BgpVpnInstance(id=1, import_rts=("1:1",)), BgpVpnInstance(id=2)))
+    assert stitched((BgpVpnInstance(id=1, import_rts=("1:1",)), BgpVpnInstance(id=2, export_rts=("2:2",))))
 
 
 def test_topology_tiers_cables_and_clients() -> None:

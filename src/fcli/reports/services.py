@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from ..gnmi.client import DataType
 from ..report import Column, NodeState, Read, Record, as_int, as_list, dig, report
 from .common import SUBINTERFACES, joined
-from .instances import NI_READS, BgpVpnInstance, instances, subinterfaces
+from .instances import NI_READS, BgpVpnInstance, instances, stitched, subinterfaces
 from .layer2 import ES_PATH, VXLAN_VNI_PATH
 
 
@@ -213,7 +213,7 @@ def services(node: NodeState) -> Iterator[Service]:
             import_rts=inst.import_rts,
             export_rts=inst.export_rts,
             vpn=inst.vpn,
-            gateway=len(inst.vpn) > 1,
+            gateway=stitched(inst.vpn),
             subnets=tuple(subnets),
             ports=tuple(ports),
             linked=tuple(sorted(linked)),

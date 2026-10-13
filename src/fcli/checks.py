@@ -20,6 +20,7 @@ from typing import Any, ClassVar
 from .fabric import Fabric, index, out_of_band, parent, text
 from .report import Record
 from .reports.bgp import BgpPeer
+from .reports.instances import stitched
 from .reports.interfaces import Subinterface
 from .reports.layer2 import EthernetSegment
 
@@ -393,6 +394,28 @@ def underlay_domains(
     return sorted(domains.values())
 
 
+def sites(fabric: Fabric) -> dict[str, str]:
+    """Each node carrying a service, by the underlay it shares: ``site 1``, ``site 2``... -
+    ``""`` for every node where there is only one.
+
+    Two sites can reuse names and route-targets: what makes them two is that a
+    leaf in one has no host route to the VTEPs of the other. Only service
+    carriers are grouped - a P router sees both sites' gateways - and gateways
+    are not joined by each other's loopbacks, which they learn over the WAN.
+    """
+    carriers: set[str] = set()
+    gateways: set[str] = set()
+    for r in fabric.get("ni"):
+        if text(r.type) in ("mac-vrf", "ip-vrf") and r.ni != "mgmt":
+            carriers.add(r.node)
+            if stitched(r.vpn):
+                gateways.add(r.node)
+    domains = underlay_domains(sorted(carriers), system_addresses(fabric), underlay_hosts(fabric), gateways)
+    if len(domains) <= 1:
+        return dict.fromkeys(carriers, "")
+    return {node: f"site {i}" for i, domain in enumerate(domains, 1) for node in domain}
+
+
 def service_groups(by_node: Mapping[str, dict[str, Any]]) -> list[list[str]]:
     """Nodes carrying one name, grouped by a shared import route-target: the services they are."""
     targets = {node: set(facts.get("import route-target") or ()) for node, facts in by_node.items()}
@@ -445,7 +468,7 @@ def check_evpn_service_mismatch(fabric: Fabric) -> Iterator[Finding]:
             facts[f"import route-target{which}"] = _rt_set(inst.import_rts)
             facts[f"export route-target{which}"] = _rt_set(inst.export_rts)
         services.setdefault(r.ni, {})[r.node] = facts
-        if len(r.vpn) > 1:
+        if stitched(r.vpn):
             gateways.setdefault(r.ni, set()).add(r.node)
     system, hosts = system_addresses(fabric), underlay_hosts(fabric)
 

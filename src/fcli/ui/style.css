@@ -1165,6 +1165,40 @@ table.grid.report th {
   padding: 8px 12px 6px 10px;
 }
 
+table.grid.report.sized {
+  table-layout: fixed;
+}
+
+table.grid.report.sized th,
+table.grid.report.sized td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.col-resize::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 3px;
+  border-right: 1px solid var(--line);
+}
+
+.col-resize:hover::after {
+  border-right: 2px solid var(--accent);
+}
+
 table.grid.report th.sorted {
   color: var(--accent);
 }
@@ -1270,10 +1304,155 @@ form.lens-form button {
   flex: 1;
 }
 
-.service-list {
+.card-find {
+  min-width: 220px;
+}
+
+.service-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  box-shadow: var(--shadow);
+}
+
+.service-card.bad {
+  border-left-color: var(--error);
+}
+
+.service-card > header {
   display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.service-card > header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.card-facts {
+  font-size: 12px;
+}
+
+.caret {
+  display: inline-block;
+  width: 12px;
+  color: var(--muted);
+}
+
+.card-body {
+  padding: 0 12px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.card-section h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.card-section h4 .muted {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: normal;
+  margin-left: 6px;
+}
+
+.pill.dci {
+  background: var(--accent);
+  color: #fff;
+  text-transform: none;
+}
+
+.pill.subnet {
+  font-family: var(--mono);
+  font-weight: 500;
+  text-transform: none;
+  background: var(--ok-soft);
+  color: var(--text);
+}
+
+.service-tables {
+  display: inline-flex;
   gap: 4px;
+  margin-left: auto;
+}
+
+.service-tables button {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.carrier-detail .service-tables {
+  margin-left: 0;
+}
+
+.pill.instance {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  text-transform: none;
+}
+
+.pill.gw {
+  text-transform: none;
+}
+
+table.carriers,
+table.mini {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+table.carriers th,
+table.mini th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+table.carriers td,
+table.mini td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+tr.carrier {
+  cursor: pointer;
+}
+
+tr.carrier:hover,
+tr.carrier.open {
+  background: var(--bg);
+}
+
+tr.carrier.bad td:first-child {
+  box-shadow: inset 2px 0 0 var(--error);
+}
+
+tr.carrier-row > td {
+  background: var(--bg);
+  padding: 6px 12px 10px 28px;
+}
+
+.carrier-detail table.mini {
+  width: auto;
+  min-width: 50%;
+  margin-bottom: 8px;
+}
+
+.carrier-detail p {
+  margin: 4px 0;
 }
 
 .node.traced .box {

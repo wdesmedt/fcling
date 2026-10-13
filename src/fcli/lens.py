@@ -32,6 +32,8 @@ class Arg:
     help: str
     #: A required argument is positional on the command line.
     required: bool = False
+    #: Positional though optional: ``fcling service`` and ``fcling service macvrf-1``.
+    positional: bool = False
     default: Any = None
     choices: tuple[str, ...] = ()
 
