@@ -117,12 +117,16 @@ class _Entries(list):  # type: ignore[type-arg]
     cost nothing. Still a list: reports and JSON never see the difference.
     """
 
-    __slots__ = ("by_key", "index_keys")
+    __slots__ = ("by_key", "index_keys", "groups", "group_keys")
 
     def __init__(self, entries: Any = ()) -> None:
         super().__init__(entries)
         self.by_key: dict[tuple[str, ...], dict[str, Any]] = {}
         self.index_keys: tuple[str, ...] | None = None
+        #: Every entry by the values of *group_keys*, which need not be all
+        #: of the list's keys: what a read naming some of them selects.
+        self.groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        self.group_keys: tuple[str, ...] | None = None
 
     def find(self, keys: tuple[tuple[str, str], ...]) -> dict[str, Any] | None:
         names = tuple(k for k, _ in keys)
@@ -131,13 +135,27 @@ class _Entries(list):  # type: ignore[type-arg]
             self.index_keys = names
         return self.by_key.get(tuple(str(v) for _, v in keys))
 
+    def matching(self, keys: tuple[tuple[str, str], ...]) -> list[dict[str, Any]]:
+        """The entries whose leaves *keys* names hold those values, in list order."""
+        names = tuple(k for k, _ in keys)
+        if self.group_keys != names:
+            self.groups = {}
+            for e in self:
+                if isinstance(e, dict):
+                    self.groups.setdefault(tuple(str(e.get(k)) for k in names), []).append(e)
+            self.group_keys = names
+        return self.groups.get(tuple(str(v) for _, v in keys), [])
+
     def add(self, entry: dict[str, Any]) -> None:
         self.append(entry)
         if self.index_keys is not None:
             self.by_key[tuple(str(entry.get(k)) for k in self.index_keys)] = entry
+        if self.group_keys is not None:
+            self.groups.setdefault(tuple(str(entry.get(k)) for k in self.group_keys), []).append(entry)
 
     def invalidate(self) -> None:
         self.index_keys = None
+        self.group_keys = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,7 +381,14 @@ class Tree:
                 yield from self._select(child, rest, keys, schema)
             return
         want = elem.key_dict
-        entries = [e for e in child if isinstance(e, dict)]
+        if want and gpath.WILDCARD not in want.values():
+            # A keyed read - an attr-set by index, among a hundred thousand -
+            # is a lookup, not a scan.
+            if not isinstance(child, _Entries):
+                child = node[elem.name] = _Entries(child)
+            entries = child.matching(elem.keys)
+        else:
+            entries = [e for e in child if isinstance(e, dict)]
         key_names = list(want) or list(self._list_keys(schema, entries) or ())
         for entry in entries:
             if any(v != gpath.WILDCARD and not _same(entry.get(k), v) for k, v in want.items()):

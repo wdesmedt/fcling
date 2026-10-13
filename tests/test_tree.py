@@ -142,3 +142,49 @@ def test_keyed_updates_find_entries_after_a_merge() -> None:
         "e2": 3,
         "e3": 4,
     }
+
+
+def test_keyed_reads_look_entries_up_and_follow_writes() -> None:
+    tree = Tree()
+    attr = "/network-instance[name=default]/bgp-rib/attr-sets/attr-set"
+    tree.update(
+        "/",
+        {
+            "network-instance": [
+                {
+                    "name": "default",
+                    "bgp-rib": {
+                        "attr-sets": {
+                            "attr-set": [{"index": i, "next-hop": f"10.0.0.{i}"} for i in range(1, 4)]
+                        }
+                    },
+                }
+            ]
+        },
+    )
+    assert tree.get(f"{attr}[index=2]") == {"index": 2, "next-hop": "10.0.0.2"}
+    assert tree.get(f"{attr}[index=9]") is None
+    tree.update(f"{attr}[index=9]", {"next-hop": "10.0.0.9"})
+    assert tree.get(f"{attr}[index=9]/next-hop") == "10.0.0.9"
+    tree.delete(f"{attr}[index=2]")
+    assert tree.get(f"{attr}[index=2]") is None
+    assert [m.value["index"] for m in tree.select(f"{attr}[index=*]")] == [1, 3, "9"]
+
+
+def test_a_partial_key_selects_every_entry_holding_it() -> None:
+    tree = Tree()
+    routes = "/rib/route"
+    tree.update(
+        "/",
+        {
+            "rib": {
+                "route": [
+                    {"prefix": "10.0.0.0/8", "neighbor": "a"},
+                    {"prefix": "10.0.0.0/8", "neighbor": "b"},
+                    {"prefix": "11.0.0.0/8", "neighbor": "a"},
+                ]
+            }
+        },
+    )
+    assert [m.value["prefix"] for m in tree.select(f"{routes}[neighbor=a]")] == ["10.0.0.0/8", "11.0.0.0/8"]
+    assert len(list(tree.select(f"{routes}[prefix=10.0.0.0/8]"))) == 2

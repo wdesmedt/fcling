@@ -11,9 +11,10 @@ import pytest
 from click.testing import CliRunner
 
 from fcli.cli import main
-from fcli.collect import collect
+from fcli.collect import by_type, collect
 from fcli.gnmi.client import AuthFailed, GnmiClient, Target, Tls, TlsFailed, Unreachable
 from fcli.inventory import Node
+from fcli.report import Read
 from fcli.reports import REGISTRY
 
 from .fake_gnmi import PASSWORD, USERNAME, FakeTarget, self_signed
@@ -185,3 +186,20 @@ def test_cli_help_needs_no_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyP
     result = CliRunner().invoke(main, ["bgp-peers", "--help"])
     assert result.exit_code == 0
     assert "--field-filter" in result.output
+
+
+def test_a_get_never_asks_for_a_list_both_whole_and_by_key() -> None:
+    """SR Linux answers that with the list, brackets stripped, in a keyed entry's update."""
+    attr = "/network-instance[name={}]/bgp-rib/attr-sets/attr-set"
+    reads = [
+        Read(attr.format("default") + "[index=7]"),
+        Read(attr.format("*")),
+        Read(attr.format("default") + "[index=9]"),
+        Read("/interface[name=*]/statistics"),
+        Read("/interface[name=mgmt0]/statistics/in-octets"),
+        Read("/system/name"),
+    ]
+    (paths,) = by_type(reads).values()
+    assert paths == [attr.format("*"), "/interface[name=*]/statistics", "/system/name"]
+    keyed = [Read(attr.format("default") + f"[index={i}]") for i in range(3)]
+    assert len(next(iter(by_type(keyed).values()))) == 3

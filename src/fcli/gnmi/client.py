@@ -21,11 +21,11 @@ import logging
 import socket
 import ssl
 import time
-from collections.abc import AsyncIterator, Iterable, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 from enum import StrEnum
 from pathlib import Path as FilePath
-from typing import Any
 
 import grpc
 from cryptography import x509
@@ -139,12 +139,50 @@ def _rpc_error(exc: grpc.aio.AioRpcError, where: str) -> GnmiError:
 # --------------------------------------------------------------------------- #
 
 
+def _merge_json_dict(into: dict[str, Any], extra: Mapping[str, Any]) -> None:
+    for key, value in extra.items():
+        current = into.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            _merge_json_dict(current, value)
+        else:
+            into[key] = value
+
+
+def decode_json_ietf(raw: bytes) -> Any:
+    """Parse gNMI JSON-IETF; some targets append a second JSON document in one value."""
+    if not raw:
+        return None
+    text = raw.decode("utf-8")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        if exc.msg != "Extra data":
+            raise
+    decoder = json.JSONDecoder()
+    merged: Any = None
+    idx = 0
+    while idx < len(text):
+        chunk = text[idx:].lstrip()
+        if not chunk:
+            break
+        obj, end = decoder.raw_decode(chunk)
+        if merged is None:
+            merged = obj
+        elif isinstance(merged, dict) and isinstance(obj, dict):
+            _merge_json_dict(merged, obj)
+        else:
+            logger.warning("gNMI JSON had extra non-dict payload; keeping the first value")
+            break
+        idx += len(text) - len(chunk) + end
+    return merged
+
+
 def decode(value: gnmi_pb2.TypedValue) -> Any:
     """A TypedValue as plain Python: JSON is parsed, scalars are unwrapped."""
     kind = value.WhichOneof("value")
     if kind in ("json_ietf_val", "json_val"):
         raw = getattr(value, kind)
-        return json.loads(raw) if raw else None
+        return decode_json_ietf(raw) if kind == "json_ietf_val" else (json.loads(raw) if raw else None)
     if kind == "leaflist_val":
         return [decode(v) for v in value.leaflist_val.element]
     if kind == "decimal_val":
