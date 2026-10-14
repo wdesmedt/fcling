@@ -105,15 +105,72 @@ export async function send(method, path, { params = {}, body } = {}) {
 }
 
 /** Follow the server's events; the browser reconnects, and the server replays what was missed. */
-export function follow(reports, onEvent, onConnection) {
-  const source = new EventSource(url("/api/events", { report: reports, token }));
-  source.onopen = () => onConnection("live");
-  source.onerror = () => onConnection(source.readyState === EventSource.CLOSED ? "closed" : "reconnecting");
-  for (const type of ["status", "node", "change", "acks"]) {
-    source.addEventListener(type, (e) => onEvent(type, JSON.parse(e.data)));
-  }
-  return () => source.close();
+export function follow(reports, onEvent, onConnection = () => {}) {
+  const listener = { reports: new Set(reports), onEvent, onConnection };
+  listeners.add(listener);
+  openStream();
+  if (stream?.readyState === EventSource.OPEN) onConnection("live");
+  return () => {
+    listeners.delete(listener);
+    if (!listeners.size) closeStream();
+  };
 }
+
+// A browser keeps at most six connections to one server over HTTP/1.1, and an
+// event stream holds one for as long as it is open. A stream per view, in every
+// tab, used them up: past that, every request - a diff, a report - waited for
+// ever. So a tab has one stream, shared by every view that follows, and a tab in
+// the background lets it go, catching up from the history when it comes back.
+
+const EVENT_TYPES = ["status", "node", "change", "acks"];
+/** How long a tab is hidden before it lets its stream go: a glance elsewhere keeps it. */
+const HIDDEN_GRACE_MS = 30_000;
+const listeners = new Set();
+let stream = null;
+/** The last change seen, so a stream opened again replays what it missed. */
+let lastSeq = null;
+let hiddenTimer = null;
+
+function deliver(type, event) {
+  for (const l of listeners) {
+    if (type === "change" && l.reports.size && !l.reports.has(event.report)) continue;
+    l.onEvent(type, event);
+  }
+}
+
+function openStream() {
+  if (stream || !listeners.size || document.hidden) return;
+  stream = new EventSource(url("/api/events", { token, ...(lastSeq ? { after: lastSeq } : {}) }));
+  stream.onopen = () => listeners.forEach((l) => l.onConnection("live"));
+  stream.onerror = () => {
+    const state = stream?.readyState === EventSource.CLOSED ? "closed" : "reconnecting";
+    listeners.forEach((l) => l.onConnection(state));
+  };
+  for (const type of EVENT_TYPES) {
+    stream.addEventListener(type, (e) => {
+      if (type === "change" && e.lastEventId) lastSeq = e.lastEventId;
+      deliver(type, JSON.parse(e.data));
+    });
+  }
+}
+
+function closeStream() {
+  stream?.close();
+  stream = null;
+}
+
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(hiddenTimer);
+  if (document.hidden) {
+    hiddenTimer = setTimeout(() => {
+      if (!stream) return;
+      closeStream();
+      listeners.forEach((l) => l.onConnection("paused"));
+    }, HIDDEN_GRACE_MS);
+  } else {
+    openStream();
+  }
+});
 
 export const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
 
