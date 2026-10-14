@@ -118,3 +118,6 @@ intent
 .mcp*
 ## dynamic project versioning
 src/fcli/_version.py
+
+# Claude Code session state and worktrees
+.claude/
