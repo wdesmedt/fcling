@@ -221,3 +221,32 @@ async def test_a_lost_node_stays_lost_while_it_is_tried_again(
         with pytest.raises(asyncio.CancelledError):
             await task
         store.close()
+
+
+def test_a_set_coming_back_in_another_order_is_no_change() -> None:
+    from fcli.delta import diff, keyed
+    from fcli.reports.routing import Route, RouteNextHop
+    from fcli.reports.services import BgpSession, Service
+
+    def route(*hops: str) -> Route:
+        return Route(
+            node="leaf1",
+            ni="default",
+            prefix="10.0.0.0/24",
+            next_hops=tuple(RouteNextHop(address=a) for a in hops),
+        )
+
+    def service(*peers: str) -> Service:
+        return Service(
+            node="leaf1",
+            name="ipvrf1",
+            bgp_peers=peers,
+            bgp_sessions=tuple(BgpSession(peer=p) for p in peers),
+        )
+
+    assert route("10.0.0.10", "10.0.0.2") == route("10.0.0.2", "10.0.0.10")
+    assert [h.address for h in route("10.0.0.10", "10.0.0.2").next_hops] == ["10.0.0.2", "10.0.0.10"]
+    assert not diff("leaf1", "services", keyed([service("b", "a")]), keyed([service("a", "b")]), 0.0)
+    assert diff("leaf1", "services", keyed([service("a")]), keyed([service("a", "b")]), 0.0)
+    # A field not declared unordered keeps the order it was given.
+    assert Service(node="leaf1", name="ipvrf1", import_rts=("2:2", "1:1")).import_rts == ("2:2", "1:1")

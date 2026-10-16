@@ -13,10 +13,8 @@ import ipaddress
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict
-
 from ..gnmi.client import DataType
-from ..report import Column, Follow, NodeState, Param, Read, Record, as_int, as_list, dig, report
+from ..report import Column, Follow, NodeState, Param, Read, Record, Value, as_int, as_list, dig, report
 from ..tree import Tree
 
 #: Above this many entries asked for by key, the table is read whole instead:
@@ -93,11 +91,7 @@ def next_hop_follow(*routes: str) -> Follow:
 # --------------------------------------------------------------------------- #
 
 
-class _Value(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-
-class Egress(_Value):
+class Egress(Value):
     """Where a next-hop leaves the node, resolved as far as the tables allow."""
 
     #: ``interface``, ``tunnel`` or ``route``.
@@ -116,7 +110,7 @@ class Egress(_Value):
         return f"{self.tunnel}:{self.value}" if self.kind == "tunnel" else self.value
 
 
-class RouteNextHop(_Value):
+class RouteNextHop(Value):
     address: str = ""
     #: ``direct``, ``indirect``...
     type: str = ""
@@ -126,6 +120,7 @@ class RouteNextHop(_Value):
 
 class Route(Record):
     key: ClassVar[tuple[str, ...]] = ("ni", "prefix", "type")
+    unordered: ClassVar[tuple[str, ...]] = ("next_hops",)
 
     ni: str
     prefix: str
@@ -330,7 +325,7 @@ def ipv6_rib(node: NodeState, address: str | None) -> Iterator[Route]:
 # --------------------------------------------------------------------------- #
 
 
-class TunnelNextHop(_Value):
+class TunnelNextHop(Value):
     address: str = ""
     subinterface: str = ""
     type: str = ""
@@ -340,6 +335,7 @@ class TunnelNextHop(_Value):
 
 class Tunnel(Record):
     key: ClassVar[tuple[str, ...]] = ("ni", "prefix", "type")
+    unordered: ClassVar[tuple[str, ...]] = ("next_hops",)
 
     ni: str
     prefix: str
@@ -399,7 +395,7 @@ def tunnel_table(node: NodeState) -> Iterator[Tunnel]:
 # --------------------------------------------------------------------------- #
 
 
-class StaticNextHop(_Value):
+class StaticNextHop(Value):
     address: str
     #: Resolved through the route table rather than directly connected.
     resolve: bool = False

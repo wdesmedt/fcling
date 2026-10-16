@@ -258,7 +258,9 @@ def test_report_replays(path: Path, index: int) -> None:
         return sorted(json.dumps(_comparable(r, volatile), sort_keys=True) for r in rows)
 
     got = canonical([r.model_dump(mode="json") for r in records])
-    assert got == canonical(entry["records"])
+    # Through the model, so a set recorded in the order the node sent it is put in its order.
+    want = [report.record.model_validate(r).model_dump(mode="json") for r in entry["records"]]
+    assert got == canonical(want)
 
 
 @pytest.mark.parametrize("path", reads_recordings(), ids=_id)

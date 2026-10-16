@@ -14,20 +14,14 @@ import ipaddress
 from collections.abc import Iterator
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict
-
 from ..gnmi.client import DataType
-from ..report import Column, NodeState, Read, Record, as_int, as_list, dig, report
+from ..report import Column, NodeState, Read, Record, Value, as_int, as_list, dig, report
 from .common import SUBINTERFACES, joined
 from .instances import NI_READS, BgpVpnInstance, instances, stitched, subinterfaces
 from .layer2 import ES_PATH, VXLAN_VNI_PATH
 
 
-class _Value(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-
-class Port(_Value):
+class Port(Value):
     """One subinterface of a service."""
 
     name: str
@@ -45,7 +39,7 @@ class Port(_Value):
     peer_ni: str = ""
 
 
-class BgpSession(_Value):
+class BgpSession(Value):
     """One BGP peer of a service, and whether its session is up."""
 
     peer: str
@@ -55,6 +49,7 @@ class BgpSession(_Value):
 
 class Service(Record):
     key: ClassVar[tuple[str, ...]] = ("name",)
+    unordered: ClassVar[tuple[str, ...]] = ("bgp_peers", "bgp_sessions", "virtual_es")
 
     name: str
     #: ``mac-vrf``, ``ip-vrf`` or ``default``.

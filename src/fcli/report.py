@@ -13,20 +13,48 @@ which is the only place a column title is written.
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from .gnmi.client import DataType, SubscriptionMode
 from .tree import Tree
 
 
-class Record(BaseModel):
-    """One row of a report, on one node."""
+def _order_key(value: Any) -> list[Any]:
+    """*value* as text, its numbers compared as numbers: ``10.0.0.2`` before ``10.0.0.10``."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
+    text = json.dumps(value, sort_keys=True, default=str)
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text)]
+
+
+class Value(BaseModel):
+    """A frozen model whose ``unordered`` fields are kept in one order, whatever
+    order the tree gave them in."""
 
     model_config = ConfigDict(frozen=True)
+
+    #: Fields that are sets, not sequences - ECMP next-hops, the peers of a
+    #: service. The tree lists entries in the order updates came in, so an entry
+    #: withdrawn and learnt again moves to the end: sorted, the record does not
+    #: change with it, and neither does the history.
+    unordered: ClassVar[tuple[str, ...]] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sort_unordered(cls, data: Any) -> Any:
+        if cls.unordered and isinstance(data, dict):
+            data = {**data, **{n: sorted(data[n], key=_order_key) for n in cls.unordered if data.get(n)}}
+        return data
+
+
+class Record(Value):
+    """One row of a report, on one node."""
 
     #: The fields that identify a record on its node, across two runs: what a
     #: diff matches rows on. Every field when empty.

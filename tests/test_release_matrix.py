@@ -72,7 +72,25 @@ ENTRY_COLUMNS = {
 }
 
 
-def _normal(row: dict[str, Any], columns: set[str]) -> dict[str, Any]:
+#: Columns of sets (``Record.unordered``): fcli listed them in the order the
+#: node sent them, fcling sorts them. A string cell is a ``, ``-joined list.
+UNORDERED: dict[str, frozenset[str]] = {
+    "ipv4-rib": frozenset({"itf", "next-hop", "label"}),
+    "ipv6-rib": frozenset({"itf", "next-hop", "label"}),
+    "tunnel-table": frozenset({"next-hop", "egress-itf", "label"}),
+    "es": frozenset({"itf/nh", "ni-peers"}),
+}
+
+
+def _as_set(value: Any) -> Any:
+    if isinstance(value, str):
+        return ", ".join(sorted(value.split(", ")))
+    return sorted(value, key=str) if isinstance(value, list) else value
+
+
+def _normal(
+    row: dict[str, Any], columns: set[str], unordered: frozenset[str] = frozenset()
+) -> dict[str, Any]:
     """A row in the old table's *columns*, without empty or volatile cells.
 
     Header line breaks are collapsed, as the old CSV did. Columns the old
@@ -84,7 +102,8 @@ def _normal(row: dict[str, Any], columns: set[str]) -> dict[str, Any]:
         title = re.sub(r"^\d+_", "", " ".join(title.split()))
         if value in (None, "", [], ()) or title in VOLATILE or title not in columns:
             continue
-        out[title] = list(value) if isinstance(value, tuple) else value
+        value = list(value) if isinstance(value, tuple) else value
+        out[title] = _as_set(value) if title in unordered else value
     return out
 
 
@@ -106,6 +125,7 @@ def test_report_matches_recording(path: Path, name: str) -> None:
         pytest.skip("not recorded on this release")
     report = REGISTRY[name]
     records = report.run(node_state(path, PORTED[name]), **PARAMS.get(name, {}))
+    unordered = UNORDERED.get(name, frozenset())
     columns = {re.sub(r"^\d+_", "", " ".join(c.split())) for c in rec["columns"]} or {
         " ".join(c.title.split()) for c in report.columns
     }
@@ -116,13 +136,13 @@ def test_report_matches_recording(path: Path, name: str) -> None:
         return value
 
     got = sorted(
-        (_normal({k: display(v) for k, v in cells(report, r).items()}, columns) for r in records),
+        (_normal({k: display(v) for k, v in cells(report, r).items()}, columns, unordered) for r in records),
         key=_canonical,
     )
     rows = rec["rows"]
     if name in ENTRY_COLUMNS:
         rows = [row for row in rows if ENTRY_COLUMNS[name] & {k for k, v in row.items() if v}]
-    want = sorted((_normal(row, columns) for row in rows), key=_canonical)
+    want = sorted((_normal(row, columns, unordered) for row in rows), key=_canonical)
     assert got == want
 
 

@@ -6,10 +6,8 @@ import re
 from collections.abc import Iterator
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict
-
 from ..gnmi.client import DataType
-from ..report import Column, NodeState, Read, Record, as_int, as_list, dig, report
+from ..report import Column, NodeState, Read, Record, Value, as_int, as_list, dig, report
 from .common import NI_INTERFACES, countdown, instances_by_interface, joined, subinterface_name
 
 # --------------------------------------------------------------------------- #
@@ -174,23 +172,21 @@ def nd(node: NodeState) -> Iterator[NeighborEntry]:
 # --------------------------------------------------------------------------- #
 
 
-class _Value(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-
-class DfCandidate(_Value):
+class DfCandidate(Value):
     address: str
     designated: bool = False
 
 
-class EsAssociation(_Value):
+class EsAssociation(Value):
     """A network-instance an ethernet-segment serves, and who may forward for it."""
+
+    unordered: ClassVar[tuple[str, ...]] = ("candidates",)
 
     ni: str
     candidates: tuple[DfCandidate, ...] = ()
 
 
-class EsNextHop(_Value):
+class EsNextHop(Value):
     """What a virtual segment tracks instead of a port: a next-hop, and its EVIs."""
 
     address: str
@@ -199,6 +195,7 @@ class EsNextHop(_Value):
 
 class EthernetSegment(Record):
     key: ClassVar[tuple[str, ...]] = ("name",)
+    unordered: ClassVar[tuple[str, ...]] = ("next_hops", "associations")
 
     name: str
     esi: str = ""
@@ -362,7 +359,7 @@ def es_dest(node: NodeState) -> Iterator[EsDestination]:
 # --------------------------------------------------------------------------- #
 
 
-class VxlanDestination(_Value):
+class VxlanDestination(Value):
     vtep: str
     vni: int | None = None
 
@@ -432,18 +429,18 @@ def vxlan(node: NodeState) -> Iterator[VxlanInterface]:
 # --------------------------------------------------------------------------- #
 
 
-class IrbAddress(_Value):
+class IrbAddress(Value):
     prefix: str
     primary: bool = False
     anycast_gw: bool = False
 
 
-class HostRouteRule(_Value):
+class HostRouteRule(Value):
     route_type: str = ""
     datapath_programming: bool = False
 
 
-class NeighborSettings(_Value):
+class NeighborSettings(Value):
     """How an irb handles ARP or ND."""
 
     proxy: bool = False
