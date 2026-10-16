@@ -214,9 +214,16 @@ export function DataTable({
     if (sort) {
       const i = sort.column;
       out = [...out].sort((a, b) => natural(a[i], b[i]) * (sort.descending ? -1 : 1));
+    } else if (!ordered) {
+      // Unsorted, nodes come in their natural order (leaf2 before leaf10), each
+      // node's rows as the report gave them: the sort is stable. Ranked once, as
+      // a node has many rows.
+      const rank = new Map([...new Set(out.map((row) => String(row[0])))].sort(natural).map((n, i) => [n, i]));
+      const of = (row) => rank.get(String(row[0]));
+      if (out.some((row, r) => r > 0 && of(out[r - 1]) > of(row))) out = [...out].sort((a, b) => of(a) - of(b));
     }
     return out;
-  }, [rows, debouncedFilter, tests, sort]);
+  }, [rows, debouncedFilter, tests, sort, ordered]);
 
   const sortBy = (i) =>
     setSort(sort?.column === i ? (sort.descending ? null : { column: i, descending: true }) : { column: i, descending: false });
