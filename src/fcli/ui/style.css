@@ -1457,6 +1457,20 @@ form.lens-form button {
   padding: 6px 16px;
 }
 
+form.lens-form label.refresh {
+  margin-left: auto;
+}
+
+form.lens-form select {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+
 .summary-line {
   display: flex;
   align-items: center;

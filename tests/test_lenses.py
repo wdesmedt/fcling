@@ -85,37 +85,38 @@ def test_endpoints_are_listed_where_they_are_attached() -> None:
 
 def _hops(source: str, destination: str, ni: str | None = None) -> list[tuple]:
     return [
-        (h.hop, h.node, h.ni, h.outcome, h.peer or h.endpoint or h.resumes_in or h.egress)
+        (h.hop, h.lookup, h.node, h.ni, h.outcome, h.peer or h.endpoint or h.resumes_in or h.egress)
         for h in LENSES["path"].run(fabric(), source=source, destination=destination, ni=ni)
     ]
 
 
 def test_a_routed_path_over_vxlan() -> None:
     assert _hops("leaf1", "10.1.1.20", "ipvrf-1") == [
-        (1, "leaf1", "ipvrf-1", "tunnel", "10.0.0.3"),
-        (2, "leaf1", "default", "forwarded", "spine1"),
-        (3, "spine1", "default", "forwarded", "leaf3"),
-        (4, "leaf3", "default", "endpoint-reached", "ipvrf-1"),
-        (5, "leaf3", "ipvrf-1", "delivered", "ethernet-1/1.1"),
+        # Numbered by node: two lookups on leaf1, one on spine1, two on leaf3.
+        (0, 1, "leaf1", "ipvrf-1", "tunnel", "10.0.0.3"),
+        (0, 2, "leaf1", "default", "forwarded", "spine1"),
+        (1, 1, "spine1", "default", "forwarded", "leaf3"),
+        (2, 1, "leaf3", "default", "endpoint-reached", "ipvrf-1"),
+        (2, 2, "leaf3", "ipvrf-1", "delivered", "ethernet-1/1.1"),
     ]
 
 
 def test_a_host_source_enters_on_every_leaf_of_its_segment() -> None:
     hops = _hops("10.1.1.10", "10.1.1.20")
-    assert [h for h in hops if h[0] == 0] == [
-        (0, "leaf1", "macvrf-1", "ingress", "lag1.1"),
-        (0, "leaf2", "macvrf-1", "ingress", "lag1.1"),
+    assert [h for h in hops if h[4] == "ingress"] == [
+        (0, 1, "leaf1", "macvrf-1", "ingress", "lag1.1"),
+        (0, 1, "leaf2", "macvrf-1", "ingress", "lag1.1"),
     ]
     # leaf2 has no route to host B: where its branch ends, and why.
-    assert (1, "leaf2", "ipvrf-1", "delivered", "irb0.1") not in hops
-    assert hops[-1][3] == "delivered"
+    assert (0, 2, "leaf2", "ipvrf-1", "delivered", "irb0.1") not in hops
+    assert hops[-1][4] == "delivered"
 
 
 def test_a_bridged_path_to_a_segment_is_aliased_over_its_vteps() -> None:
     hops = _hops("leaf3", HOST_A, "macvrf-1")
-    assert [h for h in hops if h[3] == "tunnel"] == [
-        (1, "leaf3", "macvrf-1", "tunnel", "10.0.0.1"),
-        (1, "leaf3", "macvrf-1", "tunnel", "10.0.0.2"),
+    assert [h for h in hops if h[4] == "tunnel"] == [
+        (0, 1, "leaf3", "macvrf-1", "tunnel", "10.0.0.1"),
+        (0, 1, "leaf3", "macvrf-1", "tunnel", "10.0.0.2"),
     ]
     delivered = [
         h
@@ -129,7 +130,7 @@ def test_a_bridged_path_to_a_segment_is_aliased_over_its_vteps() -> None:
 
 
 def test_path_says_where_it_goes_nowhere() -> None:
-    assert _hops("leaf2", "10.7.7.7") == [(1, "leaf2", "default", "no-route", "")]
+    assert _hops("leaf2", "10.7.7.7") == [(0, 1, "leaf2", "default", "no-route", "")]
     with pytest.raises(LensError, match="no node has 10.9.9.9 attached"):
         _hops("10.9.9.9", "10.1.1.20")
 
@@ -385,11 +386,12 @@ def test_topology_nodes_carry_the_default_instance_asn() -> None:
 def test_a_hop_names_the_owner_and_next_hop_of_its_route() -> None:
     (first, *_) = LENSES["path"].run(fabric(), source="leaf1", destination="10.1.1.20", ni="ipvrf-1")
     columns = [c.title for c in LENSES["path"].columns]
-    assert columns[4:7] == ["route", "owner", "next-hop"]
+    assert columns[5:8] == ["route", "owner", "next-hop"]
     assert (first.prefix, first.route_type, first.next_hop) == ("10.1.1.20/32", "bgp-evpn", "10.0.0.3")
 
 
 def test_path_hops_are_ordered_by_hop_then_node() -> None:
     hops = LENSES["path"].run(fabric(), source="10.1.1.10", destination="10.1.1.20")
-    order = [(h.hop, h.node) for h in hops]
+    order = [(h.hop, h.node, h.lookup) for h in hops]
     assert order == sorted(order)
+    assert {(h.hop, h.lookup) for h in hops if h.node == "spine1"} <= {(1, 1)}

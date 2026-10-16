@@ -1,7 +1,7 @@
 // The lenses: where an address is, how traffic would get there, the services end to end, every host.
 
 import { html, useEffect, useMemo, useState } from "./vendor/preact-htm.module.js";
-import { get, natural, withQuery } from "./api.js";
+import { clock, get, natural, withQuery } from "./api.js";
 import { DataTable } from "./table.js";
 import { Topology } from "./topology.js";
 
@@ -12,9 +12,53 @@ export const LENS_VIEWS = {
   endpoints: { title: "Endpoints", help: "Every host attached to the fabric, where it is attached" },
 };
 
-function useLens(name, args, at, ready) {
-  const [state, setState] = useState({ answer: null, error: "", loading: false });
+/** How often a lens may be asked again: seconds, 0 for never. */
+const REFRESH = [0, 5, 10, 30, 60, 300];
+
+/** A lens's refresh interval, kept per lens in this browser. */
+function useRefresh(name) {
+  const key = `fcli-lens-refresh:${name}`;
+  const [every, setEvery] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(key));
+      return REFRESH.includes(saved) ? saved : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const choose = (value) => {
+    setEvery(value);
+    try {
+      if (value) localStorage.setItem(key, String(value));
+      else localStorage.removeItem(key);
+    } catch {
+      // Storage may be blocked: the choice then lasts as long as the page.
+    }
+  };
+  return [every, choose];
+}
+
+function RefreshControl({ every, onChange, at, updated }) {
+  const label = (s) => (s === 0 ? "off" : s < 60 ? `every ${s}s` : `every ${s / 60}m`);
+  return html`<label class="refresh">
+    <span>Refresh${updated && !at ? html` <i class="muted">${clock(updated)}</i>` : ""}</span>
+    <select value=${every} disabled=${Boolean(at)} title=${at ? "A past instant does not change" : ""}
+            onChange=${(e) => onChange(Number(e.target.value))}>
+      ${REFRESH.map((s) => html`<option value=${s}>${label(s)}</option>`)}
+    </select>
+  </label>`;
+}
+
+/** A lens's answer, asked again every *every* seconds while the page is seen and the view is live. */
+function useLens(name, args, at, ready, every = 0) {
+  const [state, setState] = useState({ answer: null, error: "", loading: false, updated: 0 });
+  const [tick, setTick] = useState(0);
   const key = JSON.stringify([name, args, at]);
+  useEffect(() => {
+    if (!ready || at || !every) return;
+    const timer = setInterval(() => document.hidden || setTick((t) => t + 1), every * 1000);
+    return () => clearInterval(timer);
+  }, [key, ready, every]);
   useEffect(() => {
     if (!ready) {
       setState({ answer: null, error: "", loading: false });
@@ -23,13 +67,13 @@ function useLens(name, args, at, ready) {
     let current = true;
     setState((s) => ({ ...s, loading: true, error: "" }));
     get(`/api/lenses/${name}`, { ...args, at, table: 1 })
-      .then((answer) => current && setState({ answer, error: "", loading: false }))
-      .catch((e) => current && setState({ answer: null, error: e.message, loading: false }));
+      .then((answer) => current && setState({ answer, error: "", loading: false, updated: Date.now() / 1000 }))
+      .catch((e) => current && setState({ answer: null, error: e.message, loading: false, updated: 0 }));
     return () => {
       current = false;
     };
-  }, [key, ready]);
-  return state;
+  }, [key, ready, tick]);
+  return { ...state, key };
 }
 
 /** The mac-vrfs and ip-vrfs there are, for the forms. */
@@ -47,7 +91,7 @@ function useServices(at) {
   return names;
 }
 
-function Form({ fields, values, onSubmit, submit = "Show" }) {
+function Form({ fields, values, onSubmit, submit = "Show", children }) {
   const [draft, setDraft] = useState(values);
   useEffect(() => setDraft(values), [JSON.stringify(values)]);
   const go = (e) => {
@@ -63,6 +107,7 @@ function Form({ fields, values, onSubmit, submit = "Show" }) {
       </label>`,
     )}
     <button class="primary" type="submit">${submit}</button>
+    ${children}
   </form>`;
 }
 
@@ -97,6 +142,7 @@ function pathOverlay(graph, hops) {
   for (const h of hops) if (h.outcome === "endpoint-reached") owner.set(h.address, h.node);
   for (const h of hops) {
     nodes.add(h.node);
+    // A node is marked with its hop: the cables crossed to reach it.
     const mark = marks.get(h.node) || [];
     if (!mark.includes(h.hop)) mark.push(h.hop);
     marks.set(h.node, mark);
@@ -121,25 +167,14 @@ function pathOverlay(graph, hops) {
   };
 }
 
-/**
- * The nodes of the walk by the cables crossed to reach them: [[leaf1], [spine1..4], [leaf5, leaf6]].
- * Every ECMP branch is followed, so a stage holds every node a branch is at after that many cables.
- */
+/** The nodes of the walk by hop, the cables crossed to reach them: [[leaf1], [spine1..4], [leaf5, leaf6]]. */
 function pathStages(hops) {
-  // A lookup is made at node@hop; forwarding moves to the peer at hop + 1, a
-  // tunnel, leak or decapsulation looks up again on the same node.
-  const at = new Map();
   const stages = [];
-  const place = (node, crossed) => (stages[crossed] ??= new Set()).add(node);
-  for (const h of [...hops].sort((a, b) => a.hop - b.hop)) {
-    const crossed = at.get(`${h.node}@${h.hop}`) ?? 0;
-    place(h.node, crossed);
-    const next = h.outcome === "forwarded" ? [h.peer, crossed + 1]
-      : ["tunnel", "leaked", "endpoint-reached"].includes(h.outcome) ? [h.node, crossed] : null;
-    if (!next) continue;
-    const key = `${next[0]}@${h.hop + 1}`;
-    at.set(key, Math.max(at.get(key) ?? 0, next[1]));
-    place(...next);
+  const place = (node, stage) => (stages[stage] ??= new Set()).add(node);
+  for (const h of hops) {
+    place(h.node, h.hop);
+    // A walk cut short still crossed the cable to its peer.
+    if (h.outcome === "forwarded" && h.peer) place(h.peer, h.hop + 1);
   }
   return stages.filter(Boolean).map((nodes) => [...nodes].sort(natural));
 }
@@ -170,7 +205,8 @@ function PathSummary({ hops }) {
 export function PathView({ query, go, graph, status, checks, at }) {
   const services = useServices(at);
   const ready = Boolean(query.source && query.destination);
-  const state = useLens("path", { source: query.source, destination: query.destination, ni: query.ni }, at, ready);
+  const [every, setEvery] = useRefresh("path");
+  const state = useLens("path", { source: query.source, destination: query.destination, ni: query.ni }, at, ready, every);
   const hops = state.answer?.records ?? [];
   const overlay = useMemo(() => (hops.length ? pathOverlay(graph, hops) : null), [hops, graph]);
   return html`<div class="lens">
@@ -180,7 +216,9 @@ export function PathView({ query, go, graph, status, checks, at }) {
                { name: "source", label: "From", placeholder: "a node, or a host's IP or MAC", list: "fcli-nodes" },
                { name: "destination", label: "To", placeholder: "an IP or MAC" },
                { name: "ni", label: "In", placeholder: "network-instance", optional: true, list: "fcli-services" },
-             ]} />
+             ]}>
+      <${RefreshControl} every=${every} onChange=${setEvery} at=${at} updated=${state.updated} />
+    </${Form}>
     <datalist id="fcli-nodes">${graph.nodes.map((n) => html`<option value=${n.name} />`)}</datalist>
     <datalist id="fcli-services">${services.map(([n, t]) => html`<option value=${n}>${t}</option>`)}</datalist>
     ${!ready && html`<p class="muted">The path is read from the route and bridge tables; nothing is sent. From a host, it enters on each leaf it is attached to; ECMP branches, VXLAN tunnels and leaked routes are followed.</p>`}
@@ -190,7 +228,7 @@ export function PathView({ query, go, graph, status, checks, at }) {
         <${Topology} graph=${graph} status=${status} checks=${checks} overlay=${overlay} legend=${false}
                      selected=${null} onSelect=${(s) => s && go(`topology/${s.type}/${encodeURIComponent(s.id)}`)} />
       </div>
-      <${DataTable} columns=${state.answer?.columns ?? []} rows=${state.answer?.rows ?? []} ordered=${true}
+      <${DataTable} columns=${state.answer?.columns ?? []} rows=${state.answer?.rows ?? []} ordered=${true} flash=${state.key}
                     onNode=${(n) => go(`topology/node/${encodeURIComponent(n)}`)} />
     </${Result}>
   </div>`;
@@ -220,13 +258,16 @@ function whereOverlay(graph, sightings) {
 
 export function WhereView({ query, go, graph, status, checks, at }) {
   const ready = Boolean(query.address);
-  const state = useLens("where", { address: query.address }, at, ready);
+  const [every, setEvery] = useRefresh("where");
+  const state = useLens("where", { address: query.address }, at, ready, every);
   const sightings = state.answer?.records ?? [];
   const overlay = useMemo(() => (sightings.length ? whereOverlay(graph, sightings) : null), [sightings, graph]);
   const kinds = [...new Set(sightings.map((s) => s.kind))];
   return html`<div class="lens">
     <${Form} values=${{ address: query.address }} onSubmit=${(v) => go(withQuery("lens/where", v))} submit="Find"
-             fields=${[{ name: "address", label: "Address", placeholder: "10.1.3.13, 2001:db8::1, AA:C1:AB:73:4C:27", wide: true }]} />
+             fields=${[{ name: "address", label: "Address", placeholder: "10.1.3.13, 2001:db8::1, AA:C1:AB:73:4C:27", wide: true }]}>
+      <${RefreshControl} every=${every} onChange=${setEvery} at=${at} updated=${state.updated} />
+    </${Form}>
     <${Result} state=${state}>
       <div class="summary-line">
         ${kinds.includes("not-found")
@@ -240,7 +281,7 @@ export function WhereView({ query, go, graph, status, checks, at }) {
         <${Topology} graph=${graph} status=${status} checks=${checks} overlay=${overlay} legend=${false}
                      selected=${null} onSelect=${(s) => s && go(`topology/${s.type}/${encodeURIComponent(s.id)}`)} />
       </div>`}
-      <${DataTable} columns=${state.answer?.columns ?? []} rows=${state.answer?.rows ?? []}
+      <${DataTable} columns=${state.answer?.columns ?? []} rows=${state.answer?.rows ?? []} flash=${state.key}
                     onNode=${(n) => go(`topology/node/${encodeURIComponent(n)}`)} />
     </${Result}>
   </div>`;

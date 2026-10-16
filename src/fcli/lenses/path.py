@@ -18,8 +18,13 @@ A MAC destination is looked up in the bridge tables instead: learned on a port
 it is delivered there; learned from a VTEP it is a tunnel to it; behind an
 ethernet-segment, one tunnel per VTEP of the segment - aliasing.
 
-A host as the source - its IP or MAC - adds a hop 0 on each node it is
-attached to: the port and segment it enters the fabric on.
+A host as the source - its IP or MAC - adds an ingress hop on each node it
+is attached to: the port and segment it enters the fabric on.
+
+Hops are numbered by node: the hop is the cables crossed to reach the node,
+the lookup the one made on it - hop 0 lookups 1 and 2 on the first node (a
+VRF, then the underlay to a VTEP), hop 1 lookup 1 on a spine, hop 2 lookups 1
+and 2 where the far VTEP decapsulates and looks up again.
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ class Hop(Record):
 
     key: ClassVar[tuple[str, ...]] = (
         "hop",
+        "lookup",
         "ni",
         "address",
         "outcome",
@@ -55,7 +61,10 @@ class Hop(Record):
         "peer",
     )
 
+    #: The cables crossed to reach the node.
     hop: int
+    #: The lookup on the node at that hop: 1, 2... - an ingress, a VRF, the underlay.
+    lookup: int = 1
     ni: str = ""
     #: What was looked up: the destination, or the tunnel endpoint the walk is
     #: chasing through the underlay.
@@ -113,8 +122,9 @@ def _then(h: Hop) -> str:
 
 _COLUMNS = (
     Column("hop", "hop"),
+    Column("lookup", "lookup"),
     Column("NI", "ni"),
-    Column("lookup", "address"),
+    Column("address", "address"),
     Column("outcome", "outcome"),
     Column("route", "prefix"),
     Column("owner", "route_type"),
@@ -131,11 +141,21 @@ class _Step:
     ni: str
     #: The destination (an ``ipaddress`` address, or a MAC string), or a tunnel endpoint.
     address: Any
-    hop: int
+    #: Lookups made so far, on any node: what :data:`MAX_HOPS` bounds.
+    depth: int
+    hop: int = 0
+    lookup: int = 1
     seen: tuple[str, ...] = ()
     #: Chasing a tunnel endpoint: the instance to resume in, and the instance
     #: on the origin node whose route-targets say which one that is.
     resume: tuple[str, str, str] | None = None
+
+    def next(
+        self, node: str, ni: str, address: Any, seen: tuple[str, ...], resume: tuple[str, str, str] | None
+    ) -> _Step:
+        """The lookup after this one: on this node the next lookup, on another the next hop."""
+        hop, lookup = (self.hop, self.lookup + 1) if node == self.node else (self.hop + 1, 1)
+        return _Step(node, ni, address, self.depth + 1, hop, lookup, seen, resume)
 
 
 def _peer_ni(index: Index, node: str, port: str, default: str) -> str:
@@ -196,10 +216,10 @@ def _cable(index: Index, node: str, port: str) -> tuple[str, str] | None:
 )
 def path(fabric: Fabric, source: str, destination: str, ni: str | None = None) -> list[Hop]:
     # By hop, then node: the ECMP branches of a hop side by side, leaf2 before leaf10;
-    # within a node, by what it looked up and the peer each branch goes to.
+    # within a node, by lookup, the address looked up and the peer each branch goes to.
     return sorted(
         _walk(fabric, source, destination, ni),
-        key=lambda h: (h.hop, _natural(h.node), _natural(h.address), _natural(h.peer)),
+        key=lambda h: (h.hop, _natural(h.node), h.lookup, _natural(h.address), _natural(h.peer)),
     )
 
 
@@ -214,16 +234,18 @@ def _walk(fabric: Fabric, source: str, destination: str, ni: str | None) -> Iter
         raise LensError(f"{destination!r} is neither an IP nor a MAC address")
     bridged = isinstance(target, str)
     pending: list[_Step] = []
-    for hop0, node, instance in _starts(index, fabric, source, ni, bridged):
-        if hop0 is not None:
-            yield hop0
+    for ingress, node, instance in _starts(index, fabric, source, ni, bridged):
+        if ingress is not None:
+            yield ingress
+        # The first lookup follows the ingress on the same node.
+        first = 1 if ingress is None else 2
         if bridged:
             tables = index.bridges_behind(node, instance)
             having = [t for t in tables if (node, t, target) in index.macs]
             for table in having[:1] or tables[:1] or [instance]:
-                pending.append(_Step(node, table, target, 1))
+                pending.append(_Step(node, table, target, 1, lookup=first))
         else:
-            pending.append(_Step(node, instance, target, 1))
+            pending.append(_Step(node, instance, target, 1, lookup=first))
 
     made: set[tuple[Any, ...]] = set()
     while pending:
@@ -232,20 +254,21 @@ def _walk(fabric: Fabric, source: str, destination: str, ni: str | None) -> Iter
         here: dict[str, Any] = {
             "node": step.node,
             "hop": step.hop,
+            "lookup": step.lookup,
             "ni": step.ni,
             "address": str(step.address),
         }
-        if step.hop > MAX_HOPS:
+        if step.depth > MAX_HOPS:
             yield Hop(**here, outcome="too-long")
             continue
         if where in step.seen:
             yield Hop(**here, outcome="loop")
             continue
         # ECMP branches converge: a lookup already made is one answer, given once.
-        lookup = (step.node, step.ni, str(step.address), step.resume)
-        if lookup in made:
+        asked = (step.node, step.ni, str(step.address), step.resume)
+        if asked in made:
             continue
-        made.add(lookup)
+        made.add(asked)
         seen = (*step.seen, where)
         if isinstance(step.address, str):
             yield from _bridge(index, step, here, seen, pending)
@@ -363,9 +386,7 @@ def _bridge(
         )
         address = ip(endpoint)
         if address is not None:
-            pending.append(
-                _Step(step.node, "default", address, step.hop + 1, seen, (step.ni, step.node, step.ni))
-            )
+            pending.append(step.next(step.node, "default", address, seen, (step.ni, step.node, step.ni)))
 
 
 def _route(
@@ -378,7 +399,7 @@ def _route(
         instance = _resume(index, step.node, origin_node, origin_ni, want)
         yield Hop(**here, outcome="endpoint-reached", resumes_in=instance or "?")
         if instance:
-            pending.append(_Step(step.node, instance, target, step.hop + 1, seen))
+            pending.append(step.next(step.node, instance, target, seen, None))
         return
     route = index.lookup(step.node, step.ni, address)
     if route is None:
@@ -393,7 +414,7 @@ def _route(
         return
     if route.leaked_from:
         yield Hop(**here, **matched, outcome="leaked", resumes_in=route.leaked_from)
-        pending.append(_Step(step.node, route.leaked_from, address, step.hop + 1, seen, step.resume))
+        pending.append(step.next(step.node, route.leaked_from, address, seen, step.resume))
         return
     if route.type in _ATTACHED:
         yield _delivered(index, step, here, matched, route)
@@ -418,14 +439,7 @@ def _route(
                     peer_port=peer_port,
                 )
                 pending.append(
-                    _Step(
-                        peer,
-                        _peer_ni(index, peer, peer_port, step.ni),
-                        address,
-                        step.hop + 1,
-                        seen,
-                        step.resume,
-                    )
+                    step.next(peer, _peer_ni(index, peer, peer_port, step.ni), address, seen, step.resume)
                 )
                 continue
             # No fabric node behind the port: handed to whatever ARP/ND says the next-hop is.
@@ -456,7 +470,7 @@ def _route(
             end = ip(endpoint)
             if end is not None:
                 resume = step.resume or (step.ni, step.node, step.ni)
-                pending.append(_Step(step.node, "default", end, step.hop + 1, seen, resume))
+                pending.append(step.next(step.node, "default", end, seen, resume))
         else:
             yield Hop(**here, **via, outcome="unresolved", egress=egress.value)
 

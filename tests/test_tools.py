@@ -99,7 +99,8 @@ async def test_lens_tools_answer_in_table_rows() -> None:
     assert {(r["node"], r["kind"]) for r in where["rows"]} >= {("leaf1", "multihomed"), ("leaf3", "remote")}
     path = await _call("trace_path", {"source": "leaf1", "destination": "10.1.1.20", "ni": "ipvrf-1"})
     assert [r["outcome"] for r in path["rows"]][-1] == "delivered"
-    assert path["rows"][0]["hop"] == 1  # in the order walked, not sorted by node
+    first = path["rows"][0]
+    assert (first["hop"], first["lookup"]) == (0, 1)  # the first lookup, not sorted by node
     service = await _call("service_detail", {"name": "macvrf-1"})
     assert service["count"] == 3
     hosts = await _call("list_endpoints", {"nodes": ["leaf3"], "where": ["IP=10\\.1"]})

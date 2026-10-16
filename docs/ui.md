@@ -56,7 +56,7 @@ Open a commit to see what it did to the configuration: the configuration before 
 ## Lenses
 
 - **Where** finds an IP or MAC everywhere it is known ([lenses.md](lenses.md)). The nodes that hold it (configured, learned locally, or bound by ARP/ND) are picked out on the topology, marked with how they hold it. Above the table, the UI says whether a MAC on several leaves is multihomed or a duplicate.
-- **Path** traces from a node, or from a host's IP or MAC, to an address, and draws the result on the topology. The cables it forwards over are highlighted, VXLAN tunnels are dashed arcs with their VNI, and each node shows its hop numbers. The source and destination clients are highlighted too. Above it, where the trace ends: delivered (on which port, to which MAC) or why not.
+- **Path** traces from a node, or from a host's IP or MAC, to an address, and draws the result on the topology. The cables it forwards over are highlighted, VXLAN tunnels are dashed arcs with their VNI, and each node shows its hop: the cables crossed to reach it. The source and destination clients are highlighted too. Above it, where the trace ends: delivered (on which port, to which MAC) or why not.
 - **Service** shows one mac-vrf or ip-vrf on every node that carries it, and whether they agree. With no name given, it lists every service.
 - **Endpoints** lists every attached host, with a filter that stays in the URL.
 
