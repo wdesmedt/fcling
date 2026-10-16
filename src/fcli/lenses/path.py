@@ -24,6 +24,7 @@ attached to: the port and segment it enters the fabric on.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, ClassVar
@@ -193,7 +194,20 @@ def _cable(index: Index, node: str, port: str) -> tuple[str, str] | None:
     columns=_COLUMNS,
     ordered=True,
 )
-def path(fabric: Fabric, source: str, destination: str, ni: str | None = None) -> Iterator[Hop]:
+def path(fabric: Fabric, source: str, destination: str, ni: str | None = None) -> list[Hop]:
+    # By hop, then node: the ECMP branches of a hop side by side, leaf2 before leaf10;
+    # within a node, by what it looked up and the peer each branch goes to.
+    return sorted(
+        _walk(fabric, source, destination, ni),
+        key=lambda h: (h.hop, _natural(h.node), _natural(h.address), _natural(h.peer)),
+    )
+
+
+def _natural(text: str) -> list[Any]:
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text)]
+
+
+def _walk(fabric: Fabric, source: str, destination: str, ni: str | None) -> Iterator[Hop]:
     index = Index(fabric)
     target: Any = mac(destination) or ip(destination)
     if not target:

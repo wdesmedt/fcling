@@ -387,3 +387,9 @@ def test_a_hop_names_the_owner_and_next_hop_of_its_route() -> None:
     columns = [c.title for c in LENSES["path"].columns]
     assert columns[4:7] == ["route", "owner", "next-hop"]
     assert (first.prefix, first.route_type, first.next_hop) == ("10.1.1.20/32", "bgp-evpn", "10.0.0.3")
+
+
+def test_path_hops_are_ordered_by_hop_then_node() -> None:
+    hops = LENSES["path"].run(fabric(), source="10.1.1.10", destination="10.1.1.20")
+    order = [(h.hop, h.node) for h in hops]
+    assert order == sorted(order)
