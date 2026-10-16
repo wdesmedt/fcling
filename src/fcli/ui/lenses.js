@@ -121,6 +121,32 @@ function pathOverlay(graph, hops) {
   };
 }
 
+/**
+ * The nodes of the walk by the cables crossed to reach them: [[leaf1], [spine1..4], [leaf5, leaf6]].
+ * Every ECMP branch is followed, so a stage holds every node a branch is at after that many cables.
+ */
+function pathStages(hops) {
+  // A lookup is made at node@hop; forwarding moves to the peer at hop + 1, a
+  // tunnel, leak or decapsulation looks up again on the same node.
+  const at = new Map();
+  const stages = [];
+  const place = (node, crossed) => (stages[crossed] ??= new Set()).add(node);
+  for (const h of [...hops].sort((a, b) => a.hop - b.hop)) {
+    const crossed = at.get(`${h.node}@${h.hop}`) ?? 0;
+    place(h.node, crossed);
+    const next = h.outcome === "forwarded" ? [h.peer, crossed + 1]
+      : ["tunnel", "leaked", "endpoint-reached"].includes(h.outcome) ? [h.node, crossed] : null;
+    if (!next) continue;
+    const key = `${next[0]}@${h.hop + 1}`;
+    at.set(key, Math.max(at.get(key) ?? 0, next[1]));
+    place(...next);
+  }
+  return stages.filter(Boolean).map((nodes) => [...nodes].sort(natural));
+}
+
+/** A stage as its names, or as a count where the names would not fit. */
+const stageText = (nodes) => (nodes.length <= 4 ? nodes.join(" · ") : `${nodes.length} nodes`);
+
 function PathSummary({ hops }) {
   const ends = hops.filter((h) => h.outcome === "delivered" || h.outcome === "handed-off" || h.outcome === "local-ip" || FAILED.has(h.outcome));
   const ok = ends.filter((h) => !FAILED.has(h.outcome));
@@ -131,7 +157,13 @@ function PathSummary({ hops }) {
     )}
     ${bad.map((h) => html`<span class="outcome bad"><b>${h.outcome}</b> on ${h.node} (${h.ni} ${h.address})</span>`)}
     ${!ends.length && html`<span class="muted">The walk ended without an answer.</span>`}
-    <span class="muted">${new Set(hops.map((h) => h.node)).size} nodes on the way</span>
+    ${(() => {
+      const stages = pathStages(hops);
+      const hopCount = stages.length - 1;
+      return html`<span class="muted" title=${stages.map((nodes, i) => `${i}: ${nodes.join(", ")}`).join("\n")}>
+        ${hopCount < 1 ? "no cable crossed" : html`${hopCount} hop${hopCount === 1 ? "" : "s"}: ${stages.map(stageText).join(" → ")}`}
+      </span>`;
+    })()}
   </div>`;
 }
 
