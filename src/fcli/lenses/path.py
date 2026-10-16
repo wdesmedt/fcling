@@ -43,7 +43,16 @@ _DISCARD = ("discard", "blackhole", "reject")
 class Hop(Record):
     """One lookup on one node, and what the walk did with it."""
 
-    key: ClassVar[tuple[str, ...]] = ("hop", "ni", "address", "outcome", "egress", "endpoint", "peer")
+    key: ClassVar[tuple[str, ...]] = (
+        "hop",
+        "ni",
+        "address",
+        "outcome",
+        "next_hop",
+        "egress",
+        "endpoint",
+        "peer",
+    )
 
     hop: int
     ni: str = ""
@@ -62,7 +71,11 @@ class Hop(Record):
     #: ``too-long``: where a walk stops.
     outcome: str
     prefix: str = ""
+    #: Who put the route in the table: ``bgp``, ``bgp-evpn``, ``static``, ``local``...
     route_type: str = ""
+    #: The next-hop of the route the branch follows, before it resolves to a
+    #: port or a tunnel: a PE-CE peer behind a VTEP, a link-local neighbour.
+    next_hop: str = ""
     egress: str = ""
     peer: str = ""
     peer_port: str = ""
@@ -102,7 +115,9 @@ _COLUMNS = (
     Column("NI", "ni"),
     Column("lookup", "address"),
     Column("outcome", "outcome"),
-    Column("route", lambda h: f"{h.prefix} ({h.route_type})" if h.prefix and h.route_type else h.prefix),
+    Column("route", "prefix"),
+    Column("owner", "route_type"),
+    Column("next-hop", "next_hop"),
     Column("via", _via),
     Column("then", _then),
     Column("ES", lambda h: h.segment or h.esi),
@@ -374,6 +389,7 @@ def _route(
         yield Hop(**here, **matched, outcome="unresolved")
         return
     for nh, egress in branches:
+        via = {**matched, "next_hop": nh.address}
         if egress.kind == "interface":
             port = parent(egress.value)
             far = _cable(index, step.node, port)
@@ -381,7 +397,7 @@ def _route(
                 peer, peer_port = far
                 yield Hop(
                     **here,
-                    **matched,
+                    **via,
                     outcome="forwarded",
                     egress=egress.value,
                     peer=peer,
@@ -410,25 +426,25 @@ def _route(
             if bound is not None:
                 yield Hop(
                     **here,
-                    **matched,
+                    **via,
                     outcome="handed-off",
                     egress=egress.value,
                     gateway=nh.address,
                     mac=mac(bound.mac),
                 )
             else:
-                yield Hop(**here, **matched, outcome="dead-end", egress=egress.value, gateway=nh.address)
+                yield Hop(**here, **via, outcome="dead-end", egress=egress.value, gateway=nh.address)
         elif egress.kind == "tunnel":
             endpoint = egress.value.split("/", 1)[0]
             yield Hop(
-                **here, **matched, outcome="tunnel", tunnel=egress.tunnel, endpoint=endpoint, vni=egress.vni
+                **here, **via, outcome="tunnel", tunnel=egress.tunnel, endpoint=endpoint, vni=egress.vni
             )
             end = ip(endpoint)
             if end is not None:
                 resume = step.resume or (step.ni, step.node, step.ni)
                 pending.append(_Step(step.node, "default", end, step.hop + 1, seen, resume))
         else:
-            yield Hop(**here, **matched, outcome="unresolved", egress=egress.value)
+            yield Hop(**here, **via, outcome="unresolved", egress=egress.value)
 
 
 def _delivered(index: Index, step: _Step, here: dict[str, Any], matched: dict[str, Any], route: Any) -> Hop:

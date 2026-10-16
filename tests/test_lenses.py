@@ -380,3 +380,10 @@ def test_topology_nodes_carry_the_default_instance_asn() -> None:
     nodes = {n["name"]: n for n in build(dataclasses.replace(fabric(), records=records))["nodes"]}
     assert nodes["leaf1"]["asn"] == 65001
     assert nodes["leaf2"]["asn"] is None
+
+
+def test_a_hop_names_the_owner_and_next_hop_of_its_route() -> None:
+    (first, *_) = LENSES["path"].run(fabric(), source="leaf1", destination="10.1.1.20", ni="ipvrf-1")
+    columns = [c.title for c in LENSES["path"].columns]
+    assert columns[4:7] == ["route", "owner", "next-hop"]
+    assert (first.prefix, first.route_type, first.next_hop) == ("10.1.1.20/32", "bgp-evpn", "10.0.0.3")
