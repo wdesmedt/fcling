@@ -588,11 +588,12 @@ GRACE = 5
 FORCE_AFTER = 3.0
 
 
-def run(app: Starlette, host: str, port: int) -> None:
+def run(app: Starlette, host: str, port: int, ready: Callable[[], None] | None = None) -> None:
     """Serve *app* until SIGINT, SIGTERM or SIGHUP; a second one of those stops it at once.
 
     Uvicorn waits for every connection to close before it stops, and an event
     stream never closes by itself: so a signal first ends the streams.
+    *ready* is called once the server listens.
     """
     import uvicorn
 
@@ -618,6 +619,11 @@ def run(app: Starlette, host: str, port: int) -> None:
         async def serve(self, sockets: Any = None) -> None:
             self.loop = asyncio.get_running_loop()
             await super().serve(sockets)
+
+        async def startup(self, sockets: Any = None) -> None:
+            await super().startup(sockets)
+            if self.started and ready is not None:
+                ready()
 
         def handle_exit(self, sig: int, frame: Any) -> None:
             if self.should_exit:

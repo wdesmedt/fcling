@@ -16,8 +16,12 @@ Open `http://127.0.0.1:8765/` for the web UI: topology, incidents, history, lens
 | `-r REPORT` | all reports | stream only these reports; others are collected one-shot when asked |
 | `--api-token` | none on localhost | require a bearer token (`FCLI_API_TOKEN`) |
 | `--persist-acks` | off | keep acknowledged incidents across restarts, in `<db>.acks.json` beside the history |
+| `-d`, `--daemon` | off | detach from the terminal; log to `<db>.log`, pid in `<db>.pid`, beside the history |
+| `--log-file FILE` | `<db>.log` | with `--daemon`: where the log goes |
 
 **Acknowledging** an incident says it is known: it leaves the counts and moves to its own section in the UI, still shown. It is kept per finding, so a new finding joining the incident brings it back, and the acknowledgement ends when its finding clears (the same fault later is an alarm again). Without `--persist-acks` acknowledgements last until the server stops; with it, one whose finding cleared while the server was down ends on the first checks after the restart.
+
+**In the background** (`--daemon`), the server runs in a session of its own, so closing the terminal does not stop it, and everything it would have printed - logging with timestamps, uvicorn's messages, a traceback - goes to the log file. The command returns once the server listens, with its pid; a server that fails to start (a port in use) is reported there, with the end of the log. A second `--daemon` on the same history is refused while the first runs. Stop it with `kill $(cat ~/.local/state/fcli/<fabric>.pid)`. Not on Windows, which has no `fork`.
 
 ^C, SIGTERM or SIGHUP stop it within a second, ending any open event streams and closing the history. Requests still running (an agent's answer, say) get 5 seconds to finish. A second signal ends the process within 3 seconds, whatever is still open.
 

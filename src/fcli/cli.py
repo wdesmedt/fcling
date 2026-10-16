@@ -392,6 +392,17 @@ def bgp_rib_command(
     is_flag=True,
     help="keep acknowledged incidents across restarts, in a file next to the history",
 )
+@click.option(
+    "-d",
+    "--daemon",
+    is_flag=True,
+    help="detach from the terminal and log to a file; a pid file next to the history says where it runs",
+)
+@click.option(
+    "--log-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="with --daemon: where the log goes [default: next to the history]",
+)
 @click.pass_obj
 def serve(
     settings: Settings,
@@ -402,6 +413,8 @@ def serve(
     names: tuple[str, ...],
     api_token: str | None,
     persist_acks: bool,
+    daemon: bool,
+    log_file: Path | None,
 ) -> None:
     """Stream the fabric, keep its history, and serve both over HTTP"""
     try:
@@ -428,21 +441,40 @@ def serve(
         err.print(
             f"listening beyond localhost: every call needs [bold]--token {api_token}[/]", highlight=False
         )
-    path = db or default_path(fabric.name)
-    store = AsyncStore(path)
-    engine = Engine(fabric.nodes, reports, store, poll_interval=poll)
+    if log_file and not daemon:
+        raise click.UsageError("--log-file goes with --daemon")
+    path = (db or default_path(fabric.name)).resolve()
+    if daemon:
+        from .daemon import running
+
+        if (pid := running(path.with_suffix(".pid"))) is not None:
+            raise click.ClickException(f"already running as pid {pid}, for history {path}")
     acks = AckStore(acks_path(path) if persist_acks else None)
-    err.print(
+    banner = (
         f"{fabric.name}: {len(fabric.nodes)} nodes, {len(reports)} reports, history in {path}"
         + (f", acknowledgements in {acks.path} ({len(acks.all())} kept)" if acks.path else "")
-        + f"; UI at http://{host}:{port}/, API at /api/status, MCP at /mcp",
-        highlight=False,
+        + f"; UI at http://{host}:{port}/, API at /api/status, MCP at /mcp"
     )
+    err.print(banner, highlight=False)
+    ready = None
+    if daemon:
+        from .daemon import DaemonError, detach
+
+        log = (log_file or path.with_suffix(".log")).resolve()
+        try:
+            # Before the store and the engine: a fork keeps no threads.
+            ready = detach(log, path.with_suffix(".pid"))
+        except DaemonError as exc:
+            raise click.ClickException(str(exc)) from exc
+        logging.getLogger(__name__).warning("started: %s", banner)
+    store = AsyncStore(path)
+    engine = Engine(fabric.nodes, reports, store, poll_interval=poll)
     try:
         run(
             create_app(engine, fabric, api_token, host=host, rpc_timeout=settings.timeout, acks=acks),
             host,
             port,
+            ready,
         )
     finally:
         store.close()
