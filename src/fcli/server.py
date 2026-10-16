@@ -21,8 +21,9 @@ Every answer comes from :class:`~fcli.service.EngineService`, which is also
 what the MCP tools and the agent use: they cannot see a different fabric.
 
 Bound to localhost unless told otherwise; ``token`` makes every call carry
-``Authorization: Bearer <token>`` (or ``?token=``). The UI's own files hold no
-data and need none: open it with ``/?token=...`` and it passes the token on.
+``Authorization: Bearer <token>`` (or ``?token=``, or the cookie a right
+``?token=`` sets). The UI's own files hold no data and need none: open it once
+with ``/?token=...`` and that browser's tabs carry the cookie.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import render, views
 from .acks import AckStore
@@ -85,21 +86,52 @@ class _Revalidated(StaticFiles):
         return response
 
 
+#: The cookie a browser keeps the token in, so every tab it opens on the UI is let in.
+COOKIE = "fcli-token"
+
+
 class _Auth:
-    """Plain ASGI, so a streamed response passes through untouched."""
+    """Plain ASGI, so a streamed response passes through untouched.
+
+    A right ``?token=`` also sets :data:`COOKIE` (HttpOnly, SameSite=Strict):
+    the UI opened once with it, links opened from it in new tabs need none.
+    """
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         self.app = app
         self.token = token
 
+    def _right(self, given: str) -> bool:
+        return bool(given) and secrets.compare_digest(given.encode(), self.token.encode())
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and not _public(scope["path"]):
-            request = Request(scope)
-            given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-            given = given or request.query_params.get("token", "")
-            if not secrets.compare_digest(given.encode(), self.token.encode()):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        offered = request.query_params.get("token", "")
+        if not _public(scope["path"]):
+            given = (
+                request.headers.get("authorization", "").removeprefix("Bearer ").strip(),
+                offered,
+                request.cookies.get(COOKIE, ""),
+            )
+            if not any(self._right(g) for g in given):
                 await JSONResponse({"error": "unauthorized"}, status_code=401)(scope, receive, send)
                 return
+        if self._right(offered) and request.cookies.get(COOKIE) != offered:
+            cookie = f"{COOKIE}={offered}; Path=/; HttpOnly; SameSite=Strict"
+            if scope.get("scheme") == "https":
+                cookie += "; Secure"
+
+            async def send_with_cookie(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    headers = [*message.get("headers", []), (b"set-cookie", cookie.encode())]
+                    message = {**message, "headers": headers}
+                await send(message)
+
+            await self.app(scope, receive, send_with_cookie)
+            return
         await self.app(scope, receive, send)
 
 

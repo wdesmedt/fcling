@@ -1,13 +1,9 @@
 // The HTTP API and its events, as the UI uses them; and small formatting helpers.
 
 const query = new URLSearchParams(location.search);
-let token = query.get("token");
-try {
-  if (token) sessionStorage.setItem("fcli-token", token);
-  else token = sessionStorage.getItem("fcli-token");
-} catch {
-  // Storage may be blocked: the token then lasts as long as the page.
-}
+// Opened with ?token=, the server also sets a cookie: other tabs of this browser
+// are let in by it. This page keeps sending the token too, in case cookies are off.
+const token = query.get("token");
 if (query.has("token")) {
   // Keep the token out of the address bar, bookmarks and screenshots.
   query.delete("token");

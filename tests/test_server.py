@@ -163,6 +163,21 @@ def test_token(target: FakeTarget, tmp_path: Path) -> None:
     store.close()
 
 
+def test_the_token_in_the_ui_link_lets_other_tabs_in(target: FakeTarget, tmp_path: Path) -> None:
+    client, store = _client(target, tmp_path, token="s3cret")
+    with client:
+        assert "set-cookie" not in client.get("/", params={"token": "wrong"}).headers
+        assert client.get("/api/status").status_code == 401
+        cookie = client.get("/", params={"token": "s3cret"}).headers["set-cookie"]
+        assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+        # A new tab: no token in its link or its script, only the cookie.
+        assert client.get("/api/status").status_code == 200
+        assert "set-cookie" not in client.get("/", params={"token": "s3cret"}).headers
+        client.cookies.set("fcli-token", "wrong")
+        assert client.get("/api/status").status_code == 401
+    store.close()
+
+
 def test_checks_incidents_baselines_and_drift(target: FakeTarget, tmp_path: Path) -> None:
     client, store = _client(target, tmp_path, checks=True)
     with client:
