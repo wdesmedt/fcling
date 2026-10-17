@@ -16,6 +16,11 @@ dependencies = [
     "rich>=13.7",
     "pyyaml>=6.0",
     "cryptography>=42",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+    "mcp>=2.3",
+    "anthropic>=1.13",
+    "openai>=3.29",
 ]
 
 [project.urls]
@@ -26,22 +31,8 @@ Issues = "https://github.com/wdesmedt/fcling/issues"
 [project.scripts]
 fcling = "fcli.cli:main"
 
-[project.optional-dependencies]
-server = [
-    "starlette>=0.40",
-    "uvicorn>=0.30",
-]
-mcp = [
-    "mcp>=2.3",
-]
-ai = [
-    "anthropic>=1.13",
-    "openai>=3.29",
-]
-
 [dependency-groups]
 dev = [
-    "fcling[server,mcp,ai]",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "grpcio-tools>=1.84",
