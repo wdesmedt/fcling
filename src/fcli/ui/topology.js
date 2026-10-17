@@ -44,7 +44,7 @@ export function layout(graph) {
     rows.forEach((row, i) => {
       const start = (inner - rowWidth(row.names.length, NODE.w, GAP)) / 2;
       row.names.forEach((name, j) => placed.set(name, { x: start + j * (NODE.w + GAP) + NODE.w / 2, y: y + i * ROW }));
-      labels.push({ text: row.tier, y: y + i * ROW });
+      labels.push({ key: `${component.name}|${row.tier}`, text: row.tier, x: PAD, y: y + i * ROW });
     });
     y += (rows.length - 1) * ROW;
 
@@ -78,7 +78,7 @@ export function layout(graph) {
       chunk.forEach(({ client }, i) => clientPlaced.set(client.id, { x: xs[i], y: cy }));
     }
     const clientRows = Math.ceil(own.length / perRow);
-    if (own.length) labels.push({ text: "clients", y: y + ROW * 0.95 });
+    if (own.length) labels.push({ key: `${component.name}|clients`, text: "clients", x: PAD, y: y + ROW * 0.95 });
 
     // Left-align the block after the row labels.
     const lefts = [
@@ -98,7 +98,10 @@ export function layout(graph) {
   return { nodes, clients, labels, titles, width, height: y };
 }
 
-/** A cable's path, and its two halves - each from one end to the middle - to colour by what that end sends. */
+/**
+ * A cable's path, and its two halves - each from one end to the middle - to colour by what
+ * that end sends, with where each half's arrowhead goes: towards the far end, short of the middle.
+ */
 function linkPath(a, b) {
   if (Math.abs(a.y - b.y) < 1) {
     const top = a.y - NODE.h / 2;
@@ -106,17 +109,28 @@ function linkPath(a, b) {
     const c = { x: (a.x + b.x) / 2, y: top - lift };
     // The curve's middle, and each half as a curve of its own (de Casteljau at t = 0.5).
     const m = { x: (a.x + 2 * c.x + b.x) / 4, y: (top + 2 * c.y + top) / 4 };
-    const half = (p) => `M${p.x},${top} Q${(p.x + c.x) / 2},${(top + c.y) / 2} ${m.x},${m.y}`;
-    return { d: `M${a.x},${top} Q${c.x},${c.y} ${b.x},${top}`, halves: [half(a), half(b)], mid: m };
+    const halves = [a, b].map((p) => [{ x: p.x, y: top }, { x: (p.x + c.x) / 2, y: (top + c.y) / 2 }, m]);
+    return { d: `M${a.x},${top} Q${c.x},${c.y} ${b.x},${top}`, ...split(halves), mid: m };
   }
   const end = (p, q) => ({ x: p.x, y: p.y + (p.y < q.y ? NODE.h / 2 : -NODE.h / 2) });
   const pa = end(a, b);
   const pb = end(b, a);
   const m = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+  const halves = [pa, pb].map((p) => [p, { x: (p.x + m.x) / 2, y: (p.y + m.y) / 2 }, m]);
+  return { d: `M${pa.x},${pa.y} L${pb.x},${pb.y}`, ...split(halves), mid: m };
+}
+
+/** Each half [from, control, to] as a path, and its arrowhead: the point at t = 0.7 and the angle it heads in there. */
+function split(halves) {
+  const t = 0.7;
+  const u = 1 - t;
   return {
-    d: `M${pa.x},${pa.y} L${pb.x},${pb.y}`,
-    halves: [`M${pa.x},${pa.y} L${m.x},${m.y}`, `M${pb.x},${pb.y} L${m.x},${m.y}`],
-    mid: m,
+    halves: halves.map(([p, c, q]) => `M${p.x},${p.y} Q${c.x},${c.y} ${q.x},${q.y}`),
+    arrows: halves.map(([p, c, q]) => ({
+      x: u * u * p.x + 2 * u * t * c.x + t * t * q.x,
+      y: u * u * p.y + 2 * u * t * c.y + t * t * q.y,
+      angle: (Math.atan2(u * (c.y - p.y) + t * (q.y - c.y), u * (c.x - p.x) + t * (q.x - c.x)) * 180) / Math.PI,
+    })),
   };
 }
 
@@ -153,7 +167,7 @@ const share = (bps, rate) => (bps !== null && rate > 0 ? ` (${Math.round((bps / 
 
 const hasTrouble = (counts) => (counts?.error ? "error" : counts?.warning ? "warning" : "");
 
-function useViewport(box, width, height) {
+function useViewport(box, { left, top, width, height }) {
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [size, setSize] = useState({ w: 0, h: 0 });
   // Fitted to the window until panned or zoomed; Fit hands it back.
@@ -168,7 +182,7 @@ function useViewport(box, width, height) {
   const fit = () => {
     moved.current = false;
     const k = Math.min(size.w / width, size.h / height, 1.6);
-    setView({ k, x: (size.w - width * k) / 2, y: Math.max(0, (size.h - height * k) / 2) });
+    setView({ k, x: (size.w - width * k) / 2 - left * k, y: Math.max(0, (size.h - height * k) / 2) - top * k });
   };
   const move = (next) => {
     moved.current = true;
@@ -176,8 +190,26 @@ function useViewport(box, width, height) {
   };
   useEffect(() => {
     if (!moved.current && size.w > 0 && size.h > 0 && width > 0) fit();
-  }, [size, width, height]);
-  return { view, setView: move, fit };
+  }, [size, left, top, width, height]);
+  // Held where it is, as a pan would: moving a node must not refit the drawing under it.
+  const hold = () => {
+    moved.current = true;
+  };
+  return { view, setView: move, fit, hold };
+}
+
+/** A layout with its nodes, clients and tier labels moved by `offset(key)`: {dx, dy}, or nothing to stay. */
+function shifted(placed, offset) {
+  const at = (key, p) => {
+    const o = offset(key);
+    return o ? { ...p, x: p.x + o.dx, y: p.y + o.dy } : p;
+  };
+  return {
+    ...placed,
+    nodes: new Map([...placed.nodes].map(([name, p]) => [name, at(name, p)])),
+    clients: new Map([...placed.clients].map(([id, p]) => [id, at(`c:${id}`, p)])),
+    labels: placed.labels.map((l) => at(`t:${l.key}`, l)),
+  };
 }
 
 /**
@@ -198,9 +230,53 @@ export function Topology({
 }) {
   const traffic = paint.mode === "traffic";
   const box = useRef(null);
-  const placed = useMemo(() => layout(graph), [graph]);
-  const { view, setView, fit } = useViewport(box, placed.width, placed.height);
+  const base = useMemo(() => layout(graph), [graph]);
+  // What the user moved - nodes by name, clients as "c:<id>", tier labels as "t:<component>|<tier>" -
+  // as offsets from where the layout put them; kept in the browser, per lab, as other labs reuse the names.
+  const lab = status?.fabric ?? "";
+  const [moves, setMoves] = useState(() => (lab ? remembered(`${MOVES}:${lab}`, {}) : {}));
+  // While things are dragged: which, and how far. Kept apart so the view is not refitted mid-drag.
+  const [nudge, setNudge] = useState(null);
+  // Things picked with Shift, to drag together.
+  const [group, setGroup] = useState(() => new Set());
+  // A Shift-drag on the background picks what is inside it.
+  const [band, setBand] = useState(null);
+  const settled = useMemo(() => {
+    const moved = shifted(base, (key) => moves[key]);
+    // The drawing's bounds take in what was moved past its edges, so Fit still shows it all.
+    const boxes = [
+      ...[...moved.nodes.values()].map((p) => [p.x - NODE.w / 2, p.y - NODE.h / 2 - 20, p.x + NODE.w / 2, p.y + NODE.h / 2]),
+      ...[...moved.clients.values()].map((p) => [p.x - CLIENT.w / 2, p.y - CLIENT.h / 2, p.x + CLIENT.w / 2, p.y + CLIENT.h / 2]),
+      ...moved.labels.map((l) => [l.x, l.y - 10, l.x + LABEL, l.y + 10]),
+    ];
+    const left = Math.min(0, ...boxes.map((b) => b[0] - PAD));
+    const top = Math.min(0, ...boxes.map((b) => b[1] - PAD));
+    const right = Math.max(base.width, ...boxes.map((b) => b[2] + PAD));
+    const bottom = Math.max(base.height, ...boxes.map((b) => b[3] + PAD));
+    return { ...moved, left, top, width: right - left, height: bottom - top };
+  }, [base, moves]);
+  const placed = useMemo(
+    () => (nudge ? shifted(settled, (key) => (nudge.keys.has(key) ? nudge : null)) : settled),
+    [settled, nudge],
+  );
+  const { view, setView, fit, hold } = useViewport(box, settled);
   const drag = useRef(null);
+  // A drag ends in a click, which is not a pick: swallowed, until the next press.
+  const swallow = useRef(false);
+  // The lab is known once the status is: its layout is read then, and again if the lab changes.
+  useEffect(() => {
+    setMoves(lab ? remembered(`${MOVES}:${lab}`, {}) : {});
+    setGroup(new Set());
+  }, [lab]);
+  const saveMoves = (next) => {
+    setMoves(next);
+    if (lab) remember(`${MOVES}:${lab}`, next);
+  };
+  // A point on the screen, in the drawing's coordinates.
+  const drawn = (e) => {
+    const rect = box.current.getBoundingClientRect();
+    return { x: (e.clientX - rect.left - view.x) / view.k, y: (e.clientY - rect.top - view.y) / view.k };
+  };
 
   const onWheel = (e) => {
     e.preventDefault();
@@ -211,28 +287,88 @@ export function Topology({
     setView({ k, x: mx - ((mx - view.x) * k) / view.k, y: my - ((my - view.y) * k) / view.k });
   };
   const onPointerDown = (e) => {
-    drag.current = { x: e.clientX, y: e.clientY, view, moved: false };
+    if (e.shiftKey) {
+      // Picks; a press on the background does not also clear them.
+      const at = drawn(e);
+      drag.current = { kind: "band", from: at, moved: false };
+      box.current.setPointerCapture(e.pointerId);
+      setBand({ from: at, to: at });
+      return;
+    }
+    drag.current = { kind: "pan", x: e.clientX, y: e.clientY, view, moved: false };
+  };
+  const onItemDown = (key) => (e) => {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    const keys = new Set(group.has(key) ? group : [key]);
+    drag.current = { kind: "item", keys, x: e.clientX, y: e.clientY, dx: 0, dy: 0, moved: false };
   };
   const onPointerMove = (e) => {
     const d = drag.current;
     if (!d) return;
+    if (d.kind === "band") {
+      d.moved = true;
+      setBand({ from: d.from, to: drawn(e) });
+      return;
+    }
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < 4) return;
     if (!d.moved) box.current.setPointerCapture(e.pointerId);
     d.moved = true;
-    setView({ ...d.view, x: d.view.x + dx, y: d.view.y + dy });
+    if (d.kind === "item") {
+      hold();
+      d.dx = dx / view.k;
+      d.dy = dy / view.k;
+      setNudge({ keys: d.keys, dx: d.dx, dy: d.dy });
+    } else {
+      setView({ ...d.view, x: d.view.x + dx, y: d.view.y + dy });
+    }
   };
   const onPointerUp = () => {
     const d = drag.current;
     drag.current = null;
-    if (d && !d.moved) onSelect(null);
+    if (!d) return;
+    if (d.kind === "band") {
+      const [x0, x1] = [d.from.x, band?.to.x ?? d.from.x].sort((a, b) => a - b);
+      const [y0, y1] = [d.from.y, band?.to.y ?? d.from.y].sort((a, b) => a - b);
+      const inside = (p) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+      const picked = [
+        ...[...placed.nodes].filter(([, p]) => inside(p)).map(([name]) => name),
+        ...[...placed.clients].filter(([, p]) => inside(p)).map(([id]) => `c:${id}`),
+        ...placed.labels.filter((l) => inside({ x: l.x + 20, y: l.y })).map((l) => `t:${l.key}`),
+      ];
+      setGroup(new Set([...group, ...picked]));
+      setBand(null);
+    } else if (d.kind === "item" && d.moved) {
+      const next = { ...moves };
+      for (const key of d.keys) next[key] = { dx: (moves[key]?.dx ?? 0) + d.dx, dy: (moves[key]?.dy ?? 0) + d.dy };
+      saveMoves(next);
+      setNudge(null);
+    } else if (d.kind === "pan" && !d.moved) {
+      setGroup(new Set());
+      onSelect(null);
+    }
+    swallow.current = d.moved;
   };
-  const pick = (selection) => (e) => {
+  // A click: with Shift (or Ctrl, Cmd) it puts `key` in the group or takes it out; else it selects.
+  const pick = (selection, key = null) => (e) => {
     e.stopPropagation();
-    if (drag.current?.moved) return;
-    drag.current = null;
-    onSelect(selection);
+    if (swallow.current) {
+      swallow.current = false;
+      return;
+    }
+    if (key && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+      const next = new Set(group);
+      if (!next.delete(key)) next.add(key);
+      setGroup(next);
+      return;
+    }
+    if (selection) onSelect(selection);
+  };
+  const reset = () => {
+    saveMoves({});
+    setGroup(new Set());
   };
 
   // What the selection touches: the rest is dimmed.
@@ -270,11 +406,17 @@ export function Topology({
 
   return html`
     <div class="topology" ref=${box} onWheel=${onWheel} onPointerDown=${onPointerDown}
-         onPointerMove=${onPointerMove} onPointerUp=${onPointerUp}>
+         onPointerDownCapture=${() => (swallow.current = false)}
+         onPointerMove=${onPointerMove} onPointerUp=${onPointerUp} onPointerCancel=${onPointerUp}>
       <svg width="100%" height="100%">
         <g transform=${`translate(${view.x},${view.y}) scale(${view.k})`}>
           ${placed.titles.map((t) => html`<text class="component-title" x=${PAD} y=${t.y}>${t.name}</text>`)}
-          ${placed.labels.map((l) => html`<text class="row-label" x=${PAD} y=${l.y + 4}>${l.text}</text>`)}
+          ${placed.labels.map(
+            (l) => html`<g class=${`row-label${group.has(`t:${l.key}`) ? " grouped" : ""}`} transform=${`translate(${l.x},${l.y})`}
+                           onClick=${pick(null, `t:${l.key}`)} onPointerDown=${onItemDown(`t:${l.key}`)}>
+              <rect x="-4" y="-9" width=${l.text.length * 8 + 8} height="18" rx="4" /><text y="4">${l.text}</text>
+            </g>`,
+          )}
           ${graph.clients.map((c) => {
             const at = placed.clients.get(c.id);
             if (!at) return null;
@@ -293,7 +435,7 @@ export function Topology({
             const b = placed.nodes.get(l.b);
             if (!a || !b) return null;
             const id = `${l.a}|${l.b}`;
-            const { d, halves, mid } = linkPath(a, b);
+            const { d, halves, arrows, mid } = linkPath(a, b);
             const sel = selected?.type === "link" && selected.id === id ? " selected" : "";
             // Traffic: each half by what its end sends - the busiest of parallel cables. A cable not
             // carrying (down, lost, unknown) keeps its state's look whatever is drawn.
@@ -307,7 +449,9 @@ export function Topology({
                            onClick=${pick({ type: "link", id })} onPointerDown=${(e) => e.stopPropagation()}>
               <path class="hit" d=${d} />
               ${traffic && carrying
-                ? halves.map((h, i) => html`<path class=${`wire half ${heat(sends[i], paint.rate)}`} d=${h} />`)
+                ? halves.map((h, i) => html`<path class=${`wire half ${heat(sends[i], paint.rate)}`} d=${h} />
+                    <path class=${`arrow ${heat(sends[i], paint.rate)}`} d="M4,0 L-3.5,-4 L-3.5,4 Z"
+                          transform=${`translate(${arrows[i].x},${arrows[i].y}) rotate(${arrows[i].angle})`} />`)
                 : html`<path class="wire" d=${d} />`}
               ${l.count > 1 && html`<text class="count" x=${mid.x} y=${mid.y}>×${l.count}</text>`}
               <title>${title}</title>
@@ -345,9 +489,10 @@ export function Topology({
             const sel = selected?.type === "node" && selected.id === n.name ? " selected" : "";
             const errors = n.findings?.error || 0;
             const warnings = n.findings?.warning || 0;
-            return html`<g class=${`node health-${down ? "down" : n.health}${sel}${dim(`n:${n.name}`)}${traced(`n:${n.name}`)}`}
+            const grouped = group.has(n.name) ? " grouped" : "";
+            return html`<g class=${`node health-${down ? "down" : n.health}${sel}${grouped}${dim(`n:${n.name}`)}${traced(`n:${n.name}`)}`}
                            transform=${`translate(${p.x - NODE.w / 2},${p.y - NODE.h / 2})`}
-                           onClick=${pick({ type: "node", id: n.name })} onPointerDown=${(e) => e.stopPropagation()}>
+                           onClick=${pick({ type: "node", id: n.name }, n.name)} onPointerDown=${onItemDown(n.name)}>
               <rect class="box" width=${NODE.w} height=${NODE.h} rx="8" />
               <rect class="bar" width="5" height=${NODE.h} rx="2" />
               <text class="name" x="14" y="18">${n.name}</text>
@@ -370,18 +515,24 @@ export function Topology({
             const p = placed.clients.get(c.id);
             if (!p) return null;
             const sel = selected?.type === "client" && selected.id === c.id ? " selected" : "";
+            const grouped = group.has(`c:${c.id}`) ? " grouped" : "";
             const label = c.label || c.name || c.id;
-            return html`<g class=${`client${c.esi ? " multihomed" : ""}${sel}${dim(`c:${c.id}`)}${traced(`c:${c.id}`)}`}
+            return html`<g class=${`client${c.esi ? " multihomed" : ""}${sel}${grouped}${dim(`c:${c.id}`)}${traced(`c:${c.id}`)}`}
                            transform=${`translate(${p.x - CLIENT.w / 2},${p.y - CLIENT.h / 2})`}
-                           onClick=${pick({ type: "client", id: c.id })} onPointerDown=${(e) => e.stopPropagation()}>
+                           onClick=${pick({ type: "client", id: c.id }, `c:${c.id}`)} onPointerDown=${onItemDown(`c:${c.id}`)}>
               <rect width=${CLIENT.w} height=${CLIENT.h} rx="15" />
               <text x=${CLIENT.w / 2} y="19">${label.length > 15 ? `${label.slice(0, 14)}…` : label}</text>
               <title>${label}: ${[...new Set(c.attachments.map((a) => a.service))].sort(natural).join(", ")}</title>
             </g>`;
           })}
+          ${band &&
+          html`<rect class="band" x=${Math.min(band.from.x, band.to.x)} y=${Math.min(band.from.y, band.to.y)}
+                     width=${Math.abs(band.to.x - band.from.x)} height=${Math.abs(band.to.y - band.from.y)} />`}
         </g>
       </svg>
-      <div class="map-tools">
+      <div class="map-tools" onPointerDown=${(e) => e.stopPropagation()}>
+        ${Object.keys(moves).length > 0 &&
+        html`<button onClick=${reset} title="Put the nodes back where the layout placed them">Reset</button>`}
         <button onClick=${fit} title="Fit the fabric to the window">Fit</button>
         <button onClick=${() => setView({ ...view, k: Math.min(4, view.k * 1.25) })} title="Zoom in">+</button>
         <button onClick=${() => setView({ ...view, k: Math.max(0.15, view.k / 1.25) })} title="Zoom out">−</button>
@@ -401,7 +552,7 @@ function Legend({ paint }) {
       <span><i class="ln bw-3"></i>${bound(HEAT_STEPS[1])}–${bound(HEAT_STEPS[2])}</span>
       <span><i class="ln bw-4"></i>over ${bound(HEAT_STEPS[2])}</span>
       <span><i class="ln bw-none"></i>no rate yet</span>
-      <span class="muted">each half: what its end sends</span>
+      <span class="muted">each half: what its end sends, arrow pointing away from it</span>
     </div>`;
   }
   return html`<div class="legend">
@@ -581,6 +732,9 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
 }
 
 // --------------------------------------------------------------------------- overlays
+
+/** Where the user moved things to in a lab, shared by every drawing of it: "fcli-layout:<lab>". */
+const MOVES = "fcli-layout";
 
 function remembered(key, fallback) {
   try {

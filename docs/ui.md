@@ -28,7 +28,7 @@ The fabric is drawn by tier: the core on top, then gateways, spines and leaves, 
 | | |
 |---|---|
 | **health** | the default: nodes and cables by their findings and state |
-| **traffic** | each half of a cable by what its end sends, and each client's cable by what its leaf sends it: green under 25% of the **link rate**, yellow to 50%, orange to 75%, red above. A dotted half has no rate yet: a rate needs two samples. Hover a cable for both directions. |
+| **traffic** | each half of a cable by what its end sends, an arrowhead on it pointing away from that end, and each client's cable by what its leaf sends it: green under 25% of the **link rate**, yellow to 50%, orange to 75%, red above. A dotted half has no rate yet: a rate needs two samples. Hover a cable for both directions. |
 | **service** | one mac-vrf or ip-vrf: the nodes that carry it, the cables between them, and its clients. Everything else dims. |
 
 The link rate is the rate a cable counts as full at (default 10 Mbps). Emulated nodes forward far below their port speed, so it is a scale you set for the colours, not read from the ports. The browser remembers the overlay and the rate. While the drawing shows traffic, the topology is fetched every 10 seconds: rates change with every poll but are not history, so no event announces them. For the same reason, an instant in the past shows the rates as they were last kept, not as they were then.
@@ -39,7 +39,7 @@ Click a node, a cable or a client, and the panel on the right shows:
 - **Cable:** each cable's ports, state and rate in each direction, and the findings on those ports.
 - **Client:** its segment, and every attachment's node, subinterface, service, VLAN, and rates to and from it.
 
-Everything else dims, so you can see what the selection touches. Drag to pan, scroll to zoom, and press **Fit** to see the whole fabric.
+Everything else dims, so you can see what the selection touches. Drag to pan, scroll to zoom, and press **Fit** to see the whole fabric. Drag a node, a client or a tier name (spine, leaf, clients) to move it. To move several together, Shift-click them, or Shift-drag a box around them, then drag any one; a click on empty space lets them go. The browser remembers where you put them for each lab, by its name, in every drawing of it, and **Reset** puts everything back where the layout placed it.
 
 ## Incidents
 
