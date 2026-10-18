@@ -51,3 +51,48 @@ def test_the_history_leaves_out_reports_of_rates(tmp_path: Path) -> None:
     assert history_with_causes(store, reports=["ifstats"]) == []
     assert [c["report"] for c in store.history()] == ["ifstats", "lldp"]
     store.close()
+
+
+def test_the_history_is_searched_in_every_value(tmp_path: Path) -> None:
+    from fcli.delta import Change, Op
+    from fcli.store import Store, matches
+
+    store = Store(tmp_path / "h.db")
+    changes = [
+        Change(100.0, "leaf3", "subif", '["ethernet-1/49.0"]', Op.ADD, after={"name": "ethernet-1/49.0"}),
+        Change(
+            101.0,
+            "leaf1",
+            "bgp-peers",
+            '["default","10.1.3.13"]',
+            Op.CHANGE,
+            before={"peer": "10.1.3.13", "state": "established", "up": True},
+            after={"peer": "10.1.3.13", "state": "Idle", "up": False, "families": [{"name": "evpn"}]},
+        ),
+        Change(102.0, "leaf2", "mac-table", '["macvrf-102","aa:bb"]', Op.REMOVE, before={"ni": "macvrf-102"}),
+        Change(103.0, "leaf2", "lldp", '["ethernet-1/1"]', Op.ADD, after={"oper-state": "up", "note": None}),
+    ]
+    store.write(changes)
+
+    def found(text: str, **query: object) -> list[float]:
+        listed = [c["ts"] for c in store.history(match=text, **query)]  # type: ignore[arg-type]
+        # The same answer from the database as from a change in hand, as --follow filters events.
+        assert listed == [c.ts for c in changes if matches(c.as_dict(), text)]
+        return listed
+
+    assert found("") == [100.0, 101.0, 102.0, 103.0]
+    assert found("LEAF3") == [100.0]  # a node, case aside
+    assert found("ethernet-1/4") == [100.0]  # part of a key or value
+    assert found("10.1.3.13") == [101.0]
+    assert found("idle") == [101.0]  # a value after
+    assert found("established") == [101.0]  # or before
+    assert found("evpn") == [101.0]  # inside a list
+    assert found("false") == [101.0]  # a boolean, as JSON writes it
+    assert found("macvrf-102") == [102.0]
+    assert found("mac-table") == [102.0]  # a report
+    assert found("oper-state") == []  # not a field name
+    assert found("null") == []
+    assert found("leaf1 idle") == [101.0]  # every word, anywhere
+    assert found("leaf1 macvrf-102") == []
+    assert [c["ts"] for c in store.history(match="ethernet", nodes=["leaf2"])] == [103.0]
+    store.close()

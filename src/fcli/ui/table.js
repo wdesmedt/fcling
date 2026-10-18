@@ -15,7 +15,7 @@ const PAGE = 500;
 const FILTER_WAIT_MS = 150;
 const FILTER_SLICE = 4000;
 
-function useDebounced(value, ms) {
+export function useDebounced(value, ms) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(value), ms);

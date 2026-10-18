@@ -1348,7 +1348,8 @@ main.page.wide > * {
   margin-bottom: 8px;
 }
 
-input.filter {
+input.filter,
+input.history-search {
   font: inherit;
   width: min(420px, 100%);
   padding: 5px 10px;
@@ -1821,6 +1822,10 @@ tr.carrier-row > td {
 
 .segmented {
   display: inline-flex;
+}
+
+input.history-search {
+  width: min(320px, 100%);
 }
 
 .segmented button {

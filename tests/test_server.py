@@ -112,6 +112,25 @@ def test_history_since_a_baseline(client: TestClient, target: FakeTarget) -> Non
     assert client.get("/api/history", params={"baseline": "now", "since": "1h"}).status_code == 400
 
 
+def test_history_searched(client: TestClient, target: FakeTarget) -> None:
+    assert client.post("/api/baselines", json={"name": "now"}).status_code == 200
+    target.push({PEER.format("10.0.0.2") + "/session-state": "established"})
+    _until(lambda: client.get("/api/history", params={"baseline": "now"}).json())
+    everything = client.get("/api/history", params={"since": "1h"}).json()
+    assert {c["after"]["peer"] for c in everything if c["after"]} == {"10.0.0.1", "10.0.0.2"}
+    # A value anywhere in the record, case aside; every word of it.
+    for q in ("10.0.0.2", "LEAF1 10.0.0.2"):
+        found = client.get("/api/history", params={"since": "1h", "q": q}).json()
+        assert found and all("10.0.0.2" in c["key"] for c in found)
+    assert client.get("/api/history", params={"since": "1h", "q": "leaf9"}).json() == []
+    # With the other filters: only the change since the baseline, of that report.
+    (change,) = client.get(
+        "/api/history", params={"baseline": "now", "report": "bgp-peers", "q": "ESTAB"}
+    ).json()
+    assert change["op"] == "change" and change["after"]["state"] == "established"
+    assert client.get("/api/history", params={"baseline": "now", "q": "10.0.0.1"}).json() == []
+
+
 def test_unknown_report_and_bad_time(client: TestClient) -> None:
     assert client.get("/api/reports/nope").status_code == 404
     assert client.get("/api/history", params={"since": "yesterday-ish"}).status_code == 400

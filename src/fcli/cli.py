@@ -31,7 +31,7 @@ from .incidents import correlate
 from .remote import LOCAL, Remote, RemoteError, find_token, keep_token, token_path
 from .report import Param, Record, Report
 from .reports import REGISTRY, bgp_rib
-from .store import BeforeHistory, Store, default_path, parse_time
+from .store import BeforeHistory, Store, default_path, matches, parse_time
 
 try:
     from ._version import __version__
@@ -570,6 +570,14 @@ def _print_changes(changes: list[dict[str, Any]], output: str) -> None:
 @click.option("--until", metavar="TIME")
 @click.option("-n", "--node", "nodes", multiple=True)
 @click.option("-r", "--report", "reports", multiple=True)
+@click.option(
+    "-q",
+    "--grep",
+    "match",
+    default="",
+    metavar="TEXT",
+    help="only changes with every word of TEXT in their node, report, key or a value",
+)
 @click.option("--limit", default=1000, show_default=True)
 @click.option("--follow", is_flag=True, help="keep printing changes as they happen (needs --server)")
 @click.pass_obj
@@ -580,6 +588,7 @@ def history(
     until: str | None,
     nodes: tuple[str, ...],
     reports: tuple[str, ...],
+    match: str,
     limit: int,
     follow: bool,
 ) -> None:
@@ -593,7 +602,7 @@ def history(
     if remote is not None:
         try:
             changes = remote.history(
-                since=start, until=end, node=list(nodes), report=list(reports), limit=limit
+                since=start, until=end, node=list(nodes), report=list(reports), q=match or None, limit=limit
             )
         except RemoteError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -606,7 +615,7 @@ def history(
         store = Store(path)
         try:
             changes = views.history_with_causes(
-                store, since=start, until=end, nodes=nodes, reports=reports, limit=limit
+                store, since=start, until=end, nodes=nodes, reports=reports, match=match, limit=limit
             )
         finally:
             store.close()
@@ -618,7 +627,8 @@ def history(
         try:
             for event in remote.events(query):
                 if event.get("type") == "change" and event.get("op") != "update":
-                    _print_changes([event], settings.output)
+                    if not match or matches(event, match):
+                        _print_changes([event], settings.output)
                 elif event.get("type") == "node":
                     err.print(f"[dim]{event['name']}: {event['status']} {event.get('error', '')}[/]")
         except KeyboardInterrupt:

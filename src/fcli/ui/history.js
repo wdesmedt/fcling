@@ -3,6 +3,7 @@
 import { html, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
 import { clock, follow, get, natural, send, withQuery } from "./api.js";
 import { Change } from "./incidents.js";
+import { useDebounced } from "./table.js";
 
 const WINDOWS = [
   ["15m", 15 * 60],
@@ -17,6 +18,7 @@ const LIMIT = 3000;
 const BUCKETS = 60;
 const PAGE = 300;
 const SETTLE_MS = 3000;
+const SEARCH_WAIT_MS = 300;
 
 const kindOf = (c) =>
   c.report === "checks"
@@ -85,6 +87,9 @@ export function HistoryView({ query, go, graph, catalog }) {
   const report = query.report || "";
   const node = query.node || "";
   const origin = ORIGINS.some(([o]) => o === query.origin) ? query.origin : "";
+  // The search box answers as it is typed; the server is asked once typing pauses.
+  const [text, setText] = useState(query.q || "");
+  const search = useDebounced(text.trim(), SEARCH_WAIT_MS);
   const [state, setState] = useState({ changes: null, error: "", to: Date.now() / 1000 });
   const [range, setRange] = useState(null);
   const [shown, setShown] = useState(PAGE);
@@ -99,6 +104,7 @@ export function HistoryView({ query, go, graph, catalog }) {
       report,
       node,
       origin,
+      q: search,
       ...change,
     }));
   // A baseline no longer kept falls back to the latest: the summary line names the one shown.
@@ -107,6 +113,24 @@ export function HistoryView({ query, go, graph, catalog }) {
     : null;
   // What the changes are read since: nothing until the baselines are known.
   const since = sinceBaseline ? baselines && `${BASELINE}:${baseline?.name ?? ""}` : span[0];
+
+  // Back, forward or a link to another search: the box follows the address.
+  useEffect(() => {
+    if ((query.q || "") !== search) setText(query.q || "");
+  }, [query.q]);
+
+  // Into the address bar without a hashchange: a link or a reload keeps the search.
+  useEffect(() => {
+    if (search === (new URLSearchParams(location.hash.split("?")[1]).get("q") ?? "")) return;
+    history.replaceState(null, "", `#/${withQuery("history", {
+      since: sinceBaseline ? BASELINE : span[0],
+      baseline: sinceBaseline ? query.baseline : "",
+      report,
+      node,
+      origin,
+      q: search,
+    })}`);
+  }, [search]);
 
   useEffect(() => {
     get("/api/baselines").then(setBaselines).catch(() => setBaselines([]));
@@ -131,7 +155,7 @@ export function HistoryView({ query, go, graph, catalog }) {
     let current = true;
     const params = sinceBaseline ? { baseline: baseline.name } : { since: span[0] };
     const load = () =>
-      get("/api/history", { ...params, report, node, limit: LIMIT })
+      get("/api/history", { ...params, report, node, q: search, limit: LIMIT })
         .then((changes) => current && setState({ changes, error: "", to: Date.now() / 1000 }))
         .catch((e) => current && setState({ changes: null, error: e.message, to: Date.now() / 1000 }));
     load();
@@ -151,7 +175,7 @@ export function HistoryView({ query, go, graph, catalog }) {
       clearTimeout(pending.current);
       pending.current = null;
     };
-  }, [since, report, node]);
+  }, [since, report, node, search]);
 
   const all = state.changes ?? [];
   const changes = origin ? all.filter((c) => c.origin === origin) : all;
@@ -190,6 +214,9 @@ export function HistoryView({ query, go, graph, catalog }) {
         <option value="">every node</option>
         ${graph.nodes.map((n) => n.name).sort(natural).map((n) => html`<option value=${n}>${n}</option>`)}
       </select>
+      <input type="search" class="history-search" value=${text} onInput=${(e) => setText(e.target.value)}
+             placeholder="Search: leaf3, ethernet-1/49, 10.1.3.13, down…" aria-label="Search the history"
+             title="Only changes with every word somewhere in them: node, report, key, or a value before or after" />
       <span class="legend-inline">
         ${KINDS.map((k) => html`<span><i class=${`sw k-${k}`}></i>${KIND_LABEL[k]}</span>`)}
       </span>
@@ -198,12 +225,14 @@ export function HistoryView({ query, go, graph, catalog }) {
     ${state.changes &&
     html`<${Timeline} changes=${changes} from=${from} to=${to} range=${range} onRange=${setRange} />
       <div class="summary-line">
-        <span class="muted">${all.length >= LIMIT ? `the latest ${LIMIT} changes` : `${all.length} changes`} ${baseline ? html`since baseline <b>${baseline.name}</b>` : `in the last ${span[0]}`}:${" "}${configured} configuration-related, ${all.length - configured} unplanned${origin ? ` — showing the ${origin === "config" ? "configuration-related" : "unplanned"} ones` : ""}</span>
+        <span class="muted">${all.length >= LIMIT ? `the latest ${LIMIT} changes` : `${all.length} changes`}${search ? html` matching <b>${search}</b>` : ""} ${baseline ? html`since baseline <b>${baseline.name}</b>` : `in the last ${span[0]}`}:${" "}${configured} configuration-related, ${all.length - configured} unplanned${origin ? ` — showing the ${origin === "config" ? "configuration-related" : "unplanned"} ones` : ""}</span>
         ${range && html`<span class="chip">${clock(range[0])} – ${clock(range[1])} <a onClick=${() => setRange(null)}>✕</a></span>`}
       </div>
       ${listed.length
         ? html`<ul class="changes">${listed.slice(0, shown).map((c) => html`<${Change} key=${c.seq} change=${c} />`)}</ul>`
-        : html`<p class="muted">Nothing changed${range ? " then" : ""}.</p>`}
+        : search
+          ? html`<p class="muted">No change${range ? " then" : ""} matches <b>${search}</b>. <a onClick=${() => setText("")}>Clear the search</a></p>`
+          : html`<p class="muted">Nothing changed${range ? " then" : ""}.</p>`}
       ${listed.length > shown && html`<button class="more" onClick=${() => setShown(shown + PAGE)}>Show more</button>`}`}
     ${!state.changes && !state.error && html`<p class="muted">Reading the history…</p>`}
   </div>`;

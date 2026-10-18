@@ -28,7 +28,10 @@ fcling history                          # the last hour
 fcling history --since 2h -r bgp-peers -n leaf1
 fcling history --since 1d -r checks     # findings raised and cleared
 fcling history --follow                 # and keep printing as it happens (needs --server)
+fcling history --since 1d -q ethernet-1/49   # only the changes that mention it
 ```
+
+`-q`/`--grep` keeps only the changes in which every word of its text is found: in the node, the report, the key, or any value of the record before or after (`leaf3`, `10.1.3.13`, `macvrf-102`, `down`). Case doesn't matter, and part of a value is enough (`ethernet-1/4` finds `ethernet-1/49`). Field names are not searched, or `oper-state` would find nearly everything. It combines with every other option, `--since-baseline` and `--follow` included. Over HTTP it is `/api/history?q=ethernet-1/49`, and it is matched in the database, so it searches the whole window, not only the latest `--limit` changes.
 
 Times are `30m`, `2h`, `1d`, `1w` (that long ago), a time of day (`14:02`, the last time it was that), an ISO date (`2026-10-12T14:02`), or epoch seconds.
 

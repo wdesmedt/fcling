@@ -8,7 +8,8 @@
     GET  /api/incidents              the findings grouped by root cause, each saying if acknowledged
     GET|POST|DELETE /api/acks        acknowledge an incident ({incident, note}), or no longer (?incident=)
     GET  /api/history                the kept changes, oldest first, with their likely cause;
-                                     ?baseline=[name] only those since a baseline
+                                     ?baseline=[name] only those since a baseline;
+                                     ?q=text only those it is found in
     GET  /api/drift                  what differs between a baseline (or time) and now
     GET|POST /api/baselines          named instants to compare against
     GET  /api/events                 server-sent events: changes and node status
@@ -350,6 +351,8 @@ def create_app(
             "reports": query_list(request, "report"),
             "limit": int(query.get("limit", "1000")),
             "after_seq": int(query.get("after", "0")),
+            # Free text, every word of it found somewhere in the change: node, report, key or a value.
+            "match": query.get("q", ""),
         }
         try:
             for key in ("since", "until"):

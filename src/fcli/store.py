@@ -21,7 +21,7 @@ import secrets
 import sqlite3
 import time
 import zlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -98,6 +98,44 @@ def _row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def terms(text: str) -> list[str]:
+    """The words of a search, lower case: each must be found in a change."""
+    return text.lower().split()
+
+
+def _leaves(value: Any) -> Iterator[str]:
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _leaves(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _leaves(v)
+    elif isinstance(value, bool):
+        yield "true" if value else "false"
+    elif value is not None:
+        yield str(value)
+
+
+def matches(change: dict[str, Any], text: str) -> bool:
+    """Whether every word of *text* is in the change's node, report, key, or a
+    value of its record before or after - case aside. Field names are not
+    searched: ``oper-state`` would match nearly every record."""
+    fields = [change.get("node", ""), change.get("report", ""), change.get("key", "")]
+    fields += [*_leaves(change.get("before")), *_leaves(change.get("after"))]
+    haystack = [str(f).lower() for f in fields]
+    return all(any(t in f for f in haystack) for t in terms(text))
+
+
+# :func:`matches` in SQL, for one word: the values of a record are the leaves of its JSON tree.
+_LEAF = """EXISTS (SELECT 1 FROM json_tree({0}) WHERE type NOT IN ('object', 'array', 'null')
+    AND instr(lower(CASE type WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE value END), ?))"""
+_MATCH = (
+    "(instr(lower(node), ?) OR instr(lower(report), ?) OR instr(lower(key), ?)"
+    f" OR (before IS NOT NULL AND {_LEAF.format('before')})"
+    f" OR (after IS NOT NULL AND {_LEAF.format('after')}))"
+)
+
+
 class Store:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -155,9 +193,14 @@ class Store:
         after_seq: int = 0,
         limit: int = 1000,
         exclude: Sequence[str] = (),
+        match: str = "",
     ) -> list[dict[str, Any]]:
-        """Changes, oldest first; none of the reports in *exclude*."""
+        """Changes, oldest first; none of the reports in *exclude*; only those that
+        :func:`matches` *match*, when given."""
         where, args = self._where(since, until, nodes, reports)
+        for term in terms(match):
+            where.append(_MATCH)
+            args.extend([term] * 5)
         if exclude:
             where.append(f"report NOT IN ({','.join('?' * len(exclude))})")
             args.extend(exclude)
