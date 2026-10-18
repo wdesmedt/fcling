@@ -45,6 +45,38 @@ function stamp(d = new Date()) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** A dropdown of checkboxes: none ticked is every one. */
+function Pick({ options, picked, onPick, every, label }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    // A click anywhere else, or Escape, closes it.
+    const away = (e) => !box.current?.contains(e.target) && setOpen(false);
+    const escape = (e) => e.key === "Escape" && setOpen(false);
+    addEventListener("pointerdown", away);
+    addEventListener("keydown", escape);
+    return () => {
+      removeEventListener("pointerdown", away);
+      removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  const name = (v) => options.find(([o]) => o === v)?.[1] ?? v;
+  const toggle = (v) => onPick(picked.includes(v) ? picked.filter((p) => p !== v) : [...picked, v]);
+  return html`<div class="pick" ref=${box}>
+    <button class=${`pick-button${picked.length ? " on" : ""}`} aria-label=${label} aria-expanded=${open}
+            title=${picked.map(name).join(", ")} onClick=${() => setOpen(!open)}>
+      ${picked.length === 0 ? every : picked.length === 1 ? name(picked[0]) : `${picked.length} reports`} ▾
+    </button>
+    ${open &&
+    html`<div class="pick-menu" role="listbox" aria-multiselectable="true">
+      <label class=${picked.length ? "" : "on"}><input type="checkbox" checked=${!picked.length} onChange=${() => onPick([])} />${every}</label>
+      ${options.map(([v, text]) => html`<label class=${picked.includes(v) ? "on" : ""}>
+        <input type="checkbox" checked=${picked.includes(v)} onChange=${() => toggle(v)} />${text}</label>`)}
+    </div>`}
+  </div>`;
+}
+
 function Timeline({ changes, from, to, range, onRange }) {
   const width = 1000;
   const height = 90;
@@ -84,7 +116,9 @@ function Timeline({ changes, from, to, range, onRange }) {
 export function HistoryView({ query, go, graph, catalog }) {
   const sinceBaseline = query.since === BASELINE;
   const span = WINDOWS.find(([w]) => w === query.since) ?? WINDOWS[1];
+  // Several reports, comma-separated in the address: none is every report.
   const report = query.report || "";
+  const picked = report ? report.split(",") : [];
   const node = query.node || "";
   const origin = ORIGINS.some(([o]) => o === query.origin) ? query.origin : "";
   // The search box answers as it is typed; the server is asked once typing pauses.
@@ -155,13 +189,13 @@ export function HistoryView({ query, go, graph, catalog }) {
     let current = true;
     const params = sinceBaseline ? { baseline: baseline.name } : { since: span[0] };
     const load = () =>
-      get("/api/history", { ...params, report, node, q: search, limit: LIMIT })
+      get("/api/history", { ...params, report: picked, node, q: search, limit: LIMIT })
         .then((changes) => current && setState({ changes, error: "", to: Date.now() / 1000 }))
         .catch((e) => current && setState({ changes: null, error: e.message, to: Date.now() / 1000 }));
     load();
     setRange(null);
     setShown(PAGE);
-    const stop = follow(report ? [report] : [], (type, event) => {
+    const stop = follow(picked, (type, event) => {
       if (type !== "change" || event.op === "update" || uneventful.has(event.report) || pending.current) return;
       if (node && event.node !== node) return;
       pending.current = setTimeout(() => {
@@ -206,10 +240,8 @@ export function HistoryView({ query, go, graph, catalog }) {
           o === "config" ? html`<span class="tag-config">CONFIG</span>` : name
         }</button>`,
       )}</div>
-      <select value=${report} onChange=${(e) => set({ report: e.target.value })} aria-label="Report">
-        <option value="">every report</option>
-        ${reports.map((r) => html`<option value=${r}>${r === "checks" ? "findings (checks)" : r}</option>`)}
-      </select>
+      <${Pick} options=${reports.map((r) => [r, r === "checks" ? "findings (checks)" : r])} picked=${picked}
+               every="every report" label="Reports" onPick=${(p) => set({ report: p.join(",") })} />
       <select value=${node} onChange=${(e) => set({ node: e.target.value })} aria-label="Node">
         <option value="">every node</option>
         ${graph.nodes.map((n) => n.name).sort(natural).map((n) => html`<option value=${n}>${n}</option>`)}
