@@ -28,6 +28,7 @@ import pytest
 
 from fcli.engine import MAX_SUBSCRIBED_PATHS, Plan
 from fcli.gnmi import path as gpath
+from fcli.report import excluded
 from fcli.reports import REGISTRY
 
 from .replay import load, reads_recordings, reads_state, recorded, recordings
@@ -259,7 +260,9 @@ def test_report_replays(path: Path, index: int) -> None:
 
     got = canonical([r.model_dump(mode="json") for r in records])
     # Through the model, so a set recorded in the order the node sent it is put in its order.
-    want = [report.record.model_validate(r).model_dump(mode="json") for r in entry["records"]]
+    # Less the management port, left out since it was recorded.
+    models = (report.record.model_validate(r) for r in entry["records"])
+    want = [m.model_dump(mode="json") for m in models if not excluded(m)]
     assert got == canonical(want)
 
 

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from fcli.render import cells, text
+from fcli.report import EXCLUDED_INSTANCES, excluded_interface
 from fcli.reports import REGISTRY
 
 from .replay import RELEASES, node_state, recorded, recordings
@@ -118,6 +119,13 @@ CASES = [
 ]
 
 
+def _excluded(row: dict[str, Any]) -> bool:
+    """fcli showed the management port and network-instance; fcling leaves them out."""
+    if row.get("NI") in EXCLUDED_INSTANCES:
+        return True
+    return any(isinstance(v, str) and excluded_interface(v) for v in row.values())
+
+
 @pytest.mark.parametrize(("path", "name"), CASES)
 def test_report_matches_recording(path: Path, name: str) -> None:
     rec = recorded(path, PORTED[name])
@@ -142,6 +150,7 @@ def test_report_matches_recording(path: Path, name: str) -> None:
     rows = rec["rows"]
     if name in ENTRY_COLUMNS:
         rows = [row for row in rows if ENTRY_COLUMNS[name] & {k for k, v in row.items() if v}]
+    rows = [row for row in rows if not _excluded(row)]
     want = sorted((_normal(row, columns, unordered) for row in rows), key=_canonical)
     assert got == want
 

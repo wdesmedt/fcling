@@ -16,6 +16,8 @@ A finding is an `error` (the fabric isn't doing what it was built to do), a `war
 
 A check looks at the whole fabric at once. That lets it see what no single node's table shows: a link only one end reports, two leaves configured differently for the same service, the two ends of a BGP session expecting different AS numbers.
 
+The management port `mgmt0` and the `mgmt` network-instance are in no report, so no check or incident is ever about them.
+
 | Check | Finds |
 |---|---|
 | `node_unreachable` | nodes that could not be read, with the reason |

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, TypeVar
 
@@ -64,11 +64,47 @@ class Record(Value):
     #: not kept as history. ``families.received`` names a field of each
     #: element of a nested list.
     volatile: ClassVar[tuple[str, ...]] = ()
+    #: The fields that name the network-instance a record is in, or the ones
+    #: it is in: what :data:`EXCLUDED_INSTANCES` is matched on.
+    instances: ClassVar[tuple[str, ...]] = ("ni", "nis")
 
     node: str
 
 
 R = TypeVar("R", bound=Record)
+
+#: Interfaces no report shows, with their subinterfaces. The management port
+#: carries no fabric traffic: its counters, DHCP lease and the lab host's ARP
+#: entries would only be noise in every report, the history and the checks.
+EXCLUDED_INTERFACES = ("mgmt0",)
+
+#: Network-instances no report shows: ``mgmt`` holds only mgmt0 and its
+#: routes to the lab network, which are no part of the fabric.
+EXCLUDED_INSTANCES = ("mgmt",)
+
+#: The record fields that name an interface or subinterface of the node.
+_INTERFACE_FIELDS = ("interface", "name")
+
+
+def excluded_interface(name: str) -> bool:
+    """``mgmt0`` and ``mgmt0.0`` are excluded; ``ethernet-1/1`` is not."""
+    return any(name == x or name.startswith(x + ".") for x in EXCLUDED_INTERFACES)
+
+
+def _excluded_instance(value: Any) -> bool:
+    """A network-instance that is excluded, or a set of them that all are:
+    an ARP entry in ``mgmt`` alone goes, one also in ``default`` stays."""
+    if isinstance(value, str):
+        return value in EXCLUDED_INSTANCES
+    return isinstance(value, tuple) and bool(value) and all(v in EXCLUDED_INSTANCES for v in value)
+
+
+def excluded(record: Record) -> bool:
+    """Whether *record* is about an excluded interface or network-instance."""
+    values = (getattr(record, f, None) for f in _INTERFACE_FIELDS)
+    if any(isinstance(v, str) and excluded_interface(v) for v in values):
+        return True
+    return any(_excluded_instance(getattr(record, f, None)) for f in record.instances)
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,7 +207,13 @@ class Report:
         if unknown:
             raise TypeError(f"{self.name} takes no parameter {', '.join(sorted(unknown))}")
         values.update({k: v for k, v in params.items() if v is not None})
-        return list(self.build(node, **values))
+        return list(self.records(node, values))
+
+    def records(self, node: NodeState, values: Mapping[str, Any]) -> Iterator[Record]:
+        """What the report builds, less the records of an excluded interface or
+        network-instance: filtered here, every surface - a table, the history,
+        the checks - is without them, and no change is ever recorded for one."""
+        return (r for r in self.build(node, **values) if not excluded(r))
 
     def table(self, detail: bool = False) -> tuple[Column, ...]:
         return self.columns + self.detail_columns if detail else self.columns

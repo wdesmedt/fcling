@@ -49,6 +49,8 @@ class BgpSession(Value):
 
 class Service(Record):
     key: ClassVar[tuple[str, ...]] = ("name",)
+    #: A service is a network-instance, by its name.
+    instances: ClassVar[tuple[str, ...]] = ("name",)
     unordered: ClassVar[tuple[str, ...]] = ("bgp_peers", "bgp_sessions", "virtual_es")
 
     name: str

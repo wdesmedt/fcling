@@ -17,6 +17,8 @@ A report's records are compared by their key (`ni` and `peer` for a BGP session,
 
 The history lives in SQLite, by default at `~/.local/state/fcli/<fabric>.db`. It holds an append-only log of changes plus the current state. When the server restarts it compares the fabric with that state, so it only logs what changed while it was stopped, not the whole fabric again.
 
+Nothing is kept for the management port `mgmt0`, its subinterfaces or the `mgmt` network-instance: no report has records for them ([cli.md](cli.md#reports)). A history written before they were left out gets one `remove` for each of their records when the server next starts, and none after that.
+
 ## Reading it
 
 ```bash

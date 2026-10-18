@@ -37,6 +37,8 @@ Every report is a command. It asks all selected nodes at once over gNMI and prin
 
 Every report shows only operational state, not configuration.
 
+No report shows the management port `mgmt0` or its subinterfaces (`mgmt0.0`), or anything in the `mgmt` network-instance: its routes, BGP sessions, ARP entries and the instance itself. They carry no fabric traffic, and their counters, DHCP lease and the lab host's neighbours are noise. They are left out where reports build their records, so the history, checks, incidents, lenses, topology and the agent never see them either. The lists are `EXCLUDED_INTERFACES` and `EXCLUDED_INSTANCES` in `src/fcli/report.py`.
+
 ## Report options
 
 Every report takes:

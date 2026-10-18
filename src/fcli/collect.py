@@ -189,7 +189,7 @@ def _run_reports(
     for report in reports:
         try:
             values = _report_values(report, params)
-            records[report.name] = list(report.build(state, **values))
+            records[report.name] = list(report.records(state, values))
         except Exception as exc:  # a report bug on one node's data should not hide the others
             logger.exception("%s: report %s failed", state.name, report.name)
             return records, f"report {report.name} failed: {type(exc).__name__}: {exc}"
@@ -225,7 +225,7 @@ async def _run_node_batched(
             for report in reports:
                 values = _report_values(report, params or {})
                 batch: list[Record] = []
-                for rec in report.build(state, **values):
+                for rec in report.records(state, values):
                     batch.append(rec)
                     if len(batch) >= STREAM_BATCH:
                         loop.call_soon_threadsafe(q.put_nowait, ("batch", report.name, batch))
