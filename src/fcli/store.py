@@ -154,9 +154,13 @@ class Store:
         reports: Sequence[str] = (),
         after_seq: int = 0,
         limit: int = 1000,
+        exclude: Sequence[str] = (),
     ) -> list[dict[str, Any]]:
-        """Changes, oldest first."""
+        """Changes, oldest first; none of the reports in *exclude*."""
         where, args = self._where(since, until, nodes, reports)
+        if exclude:
+            where.append(f"report NOT IN ({','.join('?' * len(exclude))})")
+            args.extend(exclude)
         if after_seq:
             where.append("seq > ?")
             args.append(after_seq)

@@ -203,7 +203,10 @@ def far_ends(store: Store) -> FarEnds | None:
 
 
 def history_with_causes(store: Store, **query: Any) -> list[dict[str, Any]]:
-    changes = store.history(**query)
+    """The changes the history lists, each with its likely cause; never those
+    of a report that is not :attr:`~fcli.report.Report.eventful`."""
+    exclude = [r.name for r in REGISTRY.values() if not r.eventful]
+    changes = store.history(**query, exclude=exclude)
     if not changes:
         return changes
     # Commits on every node: one on a neighbour can be the cause.

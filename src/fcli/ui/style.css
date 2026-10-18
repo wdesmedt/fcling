@@ -1008,6 +1008,10 @@ ul.changes .delta {
   margin-right: 12px;
 }
 
+ul.changes .key {
+  margin-right: 12px;
+}
+
 ul.changes li.expandable {
   cursor: pointer;
 }

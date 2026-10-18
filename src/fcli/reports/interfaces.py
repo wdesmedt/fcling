@@ -267,6 +267,7 @@ def _counters(tree: Tree | None) -> dict[str, dict[str, int]]:
         Read("/interface[name=*]/oper-down-reason"),
     ],
     interval=5.0,
+    eventful=False,
     columns=[
         Column("interface", "name"),
         Column("oper-state", "oper"),

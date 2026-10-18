@@ -80,11 +80,18 @@ export function Change({ change }) {
     const fields = Object.keys(after).filter(
       (k) => k !== "node" && JSON.stringify(before[k]) !== JSON.stringify(after[k]),
     );
-    what = fields.slice(0, SHOWN_FIELDS).map(
-      (k) => html`<span class="delta"><b>${k}</b> ${short(before[k])} → ${short(after[k])}</span>`,
-    );
-    more = fields.length > SHOWN_FIELDS || fields.some((k) => text(before[k] ?? "").length > SHORT || text(after[k] ?? "").length > SHORT);
-    detail = fields.map((k) => html`<${FieldChange} name=${k} before=${before[k]} after=${after[k]} />`);
+    // The key first: "origin dynamic → evpn" alone does not say which address moved.
+    what = [
+      html`<span class="mono key">${keyText(change.key)}</span>`,
+      ...fields.slice(0, SHOWN_FIELDS).map(
+        (k) => html`<span class="delta"><b>${k}</b> ${short(before[k])} → ${short(after[k])}</span>`,
+      ),
+    ];
+    // Opened, the rest of the record too: where a MAC or ARP entry points, its VTEP, its ESI.
+    const rest = Object.keys(after).filter((k) => k !== "node" && !fields.includes(k) && !empty(after[k]));
+    more = rest.length > 0 || fields.length > SHOWN_FIELDS || fields.some((k) => text(before[k] ?? "").length > SHORT || text(after[k] ?? "").length > SHORT);
+    detail = html`${fields.map((k) => html`<${FieldChange} name=${k} before=${before[k]} after=${after[k]} />`)}
+      ${rest.length > 0 && html`<dl class="record">${rest.map((k) => html`<dt>${k}</dt><dd><pre>${full(after[k])}</pre></dd>`)}</dl>`}`;
   } else if (change.report === "checks") {
     const f = change.op === "add" ? after : before;
     what = html`<span>${change.op === "add" ? "raised" : "cleared"}: <b>${f.check}</b> ${f.subject} — ${f.detail}</span>`;

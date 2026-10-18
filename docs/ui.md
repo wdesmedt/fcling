@@ -49,6 +49,8 @@ The incidents tab lists the open incidents worst first, as `fcling incidents` do
 
 A timeline of every change the engine kept, in the last 15 minutes up to 7 days. It is coloured by kind: findings raised and cleared, configuration commits, changes after a commit, and unplanned changes. Bars grow with the square root of their count, so the burst of the engine's first sync doesn't flatten the rest. Click a bar to list only its changes. Narrow the history to one report (or `findings`, or `config-commits`) and one node.
 
+A changed record leads with its key, the address or MAC that changed, then the fields that differ (`origin dynamic → evpn`). Open it to see the rest of the record as it is now: the interface, VTEP or ESI it points to. Interface statistics (`ifstats`) are never listed ([history.md](history.md#what-is-kept)).
+
 **Set baseline now** keeps the fabric as it is now as a baseline (named after the time, `2026-10-18T14:02:11`) and switches to **since baseline**: only what changed from then on, with the timeline starting at the baseline. With several baselines kept, a menu picks which. Click a window (`1h`, `24h`, ...) to go back to the full history. The baselines are the same ones `fcling baseline` sets and `fcling drift` compares against ([history.md](history.md#baselines-and-drift)).
 
 **Everything / CONFIG / unplanned** separates what was planned from what wasn't. A configuration commit, and every change and finding put down to one (a commit on the node itself, or at the far end of its cable or session: [history.md](history.md#which-commit-caused-a-change)), carries a **CONFIG** tag and a violet edge. The rest is what the network did on its own. The line above the list counts both kinds.

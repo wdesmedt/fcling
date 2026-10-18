@@ -15,6 +15,8 @@ A report's records are compared by their key (`ni` and `peer` for a BGP session,
 
 **Volatile fields** move all the time and mean nothing on their own: counters, rates, a BGP family's route counts, an ARP entry's expiry, ND's reachable/stale cycling, an optic's light level. A change confined to them is not history. A BGP family going down is still a change; its received-route count ticking up is not.
 
+`ifstats` is kept, so the topology can show traffic as it was, but the history never lists it: `fcling history`, `/api/history`, the UI and the agent leave it out, even when asked for it by name. Its rows come and go with each sample of the counters, and none of them is an event.
+
 The history lives in SQLite, by default at `~/.local/state/fcli/<fabric>.db`. It holds an append-only log of changes plus the current state. When the server restarts it compares the fabric with that state, so it only logs what changed while it was stopped, not the whole fabric again.
 
 Nothing is kept for the management port `mgmt0`, its subinterfaces or the `mgmt` network-instance: no report has records for them ([cli.md](cli.md#reports)). A history written before they were left out gets one `remove` for each of their records when the server next starts, and none after that.

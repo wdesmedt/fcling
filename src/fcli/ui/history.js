@@ -90,6 +90,8 @@ export function HistoryView({ query, go, graph, catalog }) {
   const [shown, setShown] = useState(PAGE);
   const [baselines, setBaselines] = useState(null);
   const pending = useRef(null);
+  // Reports whose changes the history leaves out (rates): their events need no reload either.
+  const uneventful = new Set(catalog.filter((r) => r.eventful === false).map((r) => r.name));
   const set = (change) =>
     go(withQuery("history", {
       since: sinceBaseline ? BASELINE : span[0],
@@ -136,7 +138,7 @@ export function HistoryView({ query, go, graph, catalog }) {
     setRange(null);
     setShown(PAGE);
     const stop = follow(report ? [report] : [], (type, event) => {
-      if (type !== "change" || event.op === "update" || pending.current) return;
+      if (type !== "change" || event.op === "update" || uneventful.has(event.report) || pending.current) return;
       if (node && event.node !== node) return;
       pending.current = setTimeout(() => {
         pending.current = null;
@@ -158,7 +160,7 @@ export function HistoryView({ query, go, graph, catalog }) {
   const from = baseline ? baseline.ts : state.to - span[1];
   const to = Math.max(state.to, from + 60);
   const configured = all.filter((c) => c.origin === "config").length;
-  const reports = ["checks", "config-commits", ...catalog.filter((r) => !r.hidden).map((r) => r.name).filter((n) => n !== "config-commits").sort(natural)];
+  const reports = ["checks", "config-commits", ...catalog.filter((r) => !r.hidden && r.eventful !== false).map((r) => r.name).filter((n) => n !== "config-commits").sort(natural)];
   return html`<div class="history-view">
     <div class="view-head">
       <h2>History</h2>

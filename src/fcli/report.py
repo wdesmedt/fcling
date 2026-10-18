@@ -186,6 +186,9 @@ class Report:
     detail_columns: tuple[Column, ...] = ()
     #: Not a command of its own: reached through another, as a ``bgp-rib`` family is.
     hidden: bool = False
+    #: Whether its changes are events the history lists. Not for a report of rates:
+    #: a row there comes and goes with every sample, and says nothing happened.
+    eventful: bool = True
     #: gNMI paths depend on parameters (BGP RIB by route key, or the whole table).
     reads_for: Callable[[Mapping[str, Any]], Iterable[Read]] | None = None
 
@@ -239,6 +242,7 @@ def report(
     params: Iterable[Param] = (),
     detail_columns: Iterable[Column] = (),
     hidden: bool = False,
+    eventful: bool = True,
     reads_for: Callable[[Mapping[str, Any]], Iterable[Read]] | None = None,
 ) -> Callable[[Callable[..., Iterable[R]]], Callable[..., Iterable[R]]]:
     """Register the decorated function as the report *name*."""
@@ -258,6 +262,7 @@ def report(
             params=tuple(params),
             detail_columns=tuple(detail_columns),
             hidden=hidden,
+            eventful=eventful,
             reads_for=reads_for,
         )
         return build

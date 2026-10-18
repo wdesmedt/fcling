@@ -74,6 +74,7 @@ def catalog(streamed: Sequence[str] = ()) -> list[dict[str, Any]]:
             "help": r.help,
             "streamed": r.name in streamed,
             "hidden": r.hidden,
+            "eventful": r.eventful,
             "columns": [c.title for c in r.columns],
             "detail_columns": [c.title for c in r.detail_columns],
             "params": [

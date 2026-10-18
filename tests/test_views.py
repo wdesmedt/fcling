@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fcli.views import attribute
 
 
@@ -30,3 +32,22 @@ def test_a_time_of_day_is_the_last_time_it_was_that() -> None:
     assert parse_time("14:02", now) == datetime(2026, 10, 13, 14, 2).timestamp()
     assert parse_time("16:30", now) == datetime(2026, 10, 12, 16, 30).timestamp()
     assert parse_time("30m", now) == now - 1800
+
+
+def test_the_history_leaves_out_reports_of_rates(tmp_path: Path) -> None:
+    from fcli.delta import Change, Op
+    from fcli.store import Store
+    from fcli.views import history_with_causes
+
+    store = Store(tmp_path / "h.db")
+    store.write(
+        [
+            Change(100.0, "leaf1", "ifstats", '["ethernet-1/1"]', Op.ADD, after={"name": "ethernet-1/1"}),
+            Change(101.0, "leaf1", "lldp", '["ethernet-1/1"]', Op.ADD, after={"interface": "ethernet-1/1"}),
+        ]
+    )
+    # Counters come and go with every sample: not events, even when asked for.
+    assert [c["report"] for c in history_with_causes(store)] == ["lldp"]
+    assert history_with_causes(store, reports=["ifstats"]) == []
+    assert [c["report"] for c in store.history()] == ["ifstats", "lldp"]
+    store.close()
