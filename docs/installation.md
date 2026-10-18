@@ -5,21 +5,22 @@
 fcli needs Python 3.11 or later. It is published on PyPI as `fcling` and installs a command named `fcling`:
 
 ```bash
-uv tool install 'fcling[server,mcp,ai]'    # or: pipx install 'fcling[server,mcp,ai]'
+uv tool install fcling      # or: pipx install fcling
 ```
 
 From a checkout, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install '.[server,mcp,ai]'         # an `fcling` command on your PATH
-uv sync --all-extras && uv run fcling ...    # or run it from the checkout
+uv tool install .           # or `uv tool install --editable .` to pick up your changes
 ```
+
+Either way, `fcling` is then on your PATH: run it as `fcling ...` from any directory, with no `uv run` in front. `uv tool upgrade fcling` updates it.
 
 The command is `fcling` so that it can be installed beside the original, Nornir-based fcli, whose command is `fcli`.
 
 ### Container image
 
-Each release is also an image with every extra, `ghcr.io/wdesmedt/fcling`. Its entrypoint is `fcling`, it works in `/work` and keeps its history in the `/state` volume:
+Each release is also an image, `ghcr.io/wdesmedt/fcling`. Its entrypoint is `fcling`, it works in `/work` and keeps its history in the `/state` volume:
 
 ```bash
 docker run --rm --network host -v "$PWD:/work" ghcr.io/wdesmedt/fcling -t lab.clab.yml sys-info
@@ -27,17 +28,9 @@ docker run -d --name fcling --network host -v "$PWD:/work" -v fcli-state:/state 
     ghcr.io/wdesmedt/fcling -t lab.clab.yml serve
 ```
 
-`--network host` lets it reach containerlab nodes by their container names and keeps `fcling serve` on localhost. Without it, publish the port and listen on every address: `-p 8765:8765 ... serve --host 0.0.0.0`. Beyond localhost every call needs a token; fcli makes one up and prints it, or takes yours with `--api-token`.
+`--network host` lets it reach containerlab nodes by their container names and keeps `fcling serve` on localhost. Without it, publish the port and listen on every address: `-p 8765:8765 ... serve --host 0.0.0.0`. Beyond localhost every call needs a token. fcli makes one up, keeps it next to the history so restarts keep it, and prints the UI's URL with the token in it. You can give your own with `--api-token` instead.
 
-The core package is the one-shot CLI. The extras add the rest:
-
-| Extra | Adds | Needed for |
-|---|---|---|
-| `server` | Starlette, uvicorn | `fcling serve`: the engine, its history, the HTTP API |
-| `mcp` | the MCP SDK | `fcling mcp`, and `/mcp` on `fcling serve` |
-| `ai` | the Anthropic and OpenAI SDKs | `fcling ask`, and `/api/chat` on `fcling serve` |
-
-A command that needs an extra you don't have says which one to install.
+The package includes everything: the one-shot CLI, `fcling serve` with its HTTP API and UI, MCP, and the agent.
 
 ## Point fcli at a fabric
 

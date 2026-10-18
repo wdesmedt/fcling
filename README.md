@@ -7,51 +7,55 @@ What an SR Linux fabric looks like, what is wrong with it, and what changed, str
 
 This is a ground-up rewrite of [fcli](https://github.com/srl-labs/fcli). It runs on asyncio throughout, uses no Nornir and makes no blocking gNMI calls.
 
+Install the `fcling` command once, then run it from anywhere:
+
 ```bash
-uv tool install 'fcling[server,mcp,ai]'                    # the `fcling` command, from PyPI
+uv tool install fcling          # from PyPI; or `uv tool install .` from a checkout
+```
+
+Or run it with Docker, without installing anything:
+
+```bash
 docker run --rm --network host -v "$PWD:/work" ghcr.io/wdesmedt/fcling -t lab.clab.yml bgp-peers
 ```
 
-Or from a checkout:
+Then:
 
 ```bash
-uv sync
-uv run fcling -t lab.clab.yml bgp-peers
-uv run fcling -t lab.clab.yml -i role=leaf -o json subif -f oper=down
-uv run fcling -c inventory.yml sys-info
-uv run fcling -t lab.clab.yml ipv4-rib -a 10.1.3.99          # longest-prefix match
-uv run fcling -t lab.clab.yml bgp-rib -r evpn -t 5 -d        # with the detail columns
-uv run fcling -t lab.clab.yml ifstats -s 2 -f oper=up        # rates over 2 s
+fcling -t lab.clab.yml bgp-peers
+fcling -t lab.clab.yml -i role=leaf -o json subif -f oper=down
+fcling -c inventory.yml sys-info
+fcling -t lab.clab.yml ipv4-rib -a 10.1.3.99          # longest-prefix match
+fcling -t lab.clab.yml bgp-rib -r evpn -t 5 -d        # with the detail columns
+fcling -t lab.clab.yml ifstats -s 2 -f oper=up        # rates over 2 s
 ```
 
 With the engine running, the same commands answer instantly from what it streams, and can look back:
 
 ```bash
-uv sync --extra server
-uv run fcling -t lab.clab.yml serve                          # streams every node, keeps history
+fcling -t lab.clab.yml serve                          # streams every node, keeps history
 export FCLI_SERVER=http://127.0.0.1:8765
-uv run fcling bgp-peers                                      # live, from the engine
-uv run fcling bgp-peers --at 14:02                           # as it was then
-uv run fcling history --since 1h -r bgp-peers --follow       # what changed, which commit did it, and keeps watching
+fcling bgp-peers                                      # live, from the engine
+fcling bgp-peers --at 14:02                           # as it was then
+fcling history --since 1h -r bgp-peers --follow       # what changed, which commit did it, and keeps watching
 ```
 
 What is wrong, and what changed:
 
 ```bash
-uv run fcling checks                          # every finding, check by check
-uv run fcling incidents -v                    # grouped by root cause, worst first
-uv run fcling incidents --at 14:02            # what was wrong then
-uv run fcling baseline pre-change -m "before the MTU change"
-uv run fcling drift pre-change                # what came, went and changed since
-uv run fcling config-diff leaf1 12             # what commit 12 did to leaf1's configuration, side by side
+fcling checks                          # every finding, check by check
+fcling incidents -v                    # grouped by root cause, worst first
+fcling incidents --at 14:02            # what was wrong then
+fcling baseline pre-change -m "before the MTU change"
+fcling drift pre-change                # what came, went and changed since
+fcling config-diff leaf1 12             # what commit 12 did to leaf1's configuration, side by side
 ```
 
 Ask, or let your own AI client ask. Both get the same 14 read-only tools: status, reports, incidents, checks, history, configuration diffs, drift, baselines, the lenses and the topology.
 
 ```bash
-uv sync --extra server --extra mcp --extra ai
-uv run fcling ask "what is wrong, and what changed just before?"        # the first provider with a key
-uv run fcling ask --provider openai --effort low "is BGP healthy?"
+fcling ask "what is wrong, and what changed just before?"        # the first provider with a key
+fcling ask --provider openai --effort low "is BGP healthy?"
 claude mcp add --transport http fcli http://127.0.0.1:8765/mcp        # MCP over HTTP from `fcling serve`
 claude mcp add fcli -- fcling --server http://127.0.0.1:8765 mcp        # or over stdio
 ```
@@ -59,11 +63,11 @@ claude mcp add fcli -- fcling --server http://127.0.0.1:8765 mcp        # or ove
 Questions across the whole fabric, and its shape:
 
 ```bash
-uv run fcling -t lab.clab.yml where 10.1.3.13                        # every place that knows an IP or MAC
-uv run fcling -t lab.clab.yml path leaf1 10.1.3.13 --ni ipvrf-1      # hop by hop, over ECMP and VXLAN
-uv run fcling -t lab.clab.yml service macvrf-102                     # one service on every node, and what disagrees
-uv run fcling -t lab.clab.yml endpoints                              # every attached host
-uv run fcling -t lab.clab.yml topology                               # tiers, cables, clients, segments
+fcling -t lab.clab.yml where 10.1.3.13                        # every place that knows an IP or MAC
+fcling -t lab.clab.yml path leaf1 10.1.3.13 --ni ipvrf-1      # hop by hop, over ECMP and VXLAN
+fcling -t lab.clab.yml service macvrf-102                     # one service on every node, and what disagrees
+fcling -t lab.clab.yml endpoints                              # every attached host
+fcling -t lab.clab.yml topology                               # tiers, cables, clients, segments
 ```
 
 `checks` and `incidents` work without a server too: one-shot from the nodes, or from the local history with `--at`. They exit 1 when there is an error, so they can gate a pipeline.

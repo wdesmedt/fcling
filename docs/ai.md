@@ -48,7 +48,7 @@ claude mcp add fcli -- fcling --server http://127.0.0.1:8765 mcp      # through 
 claude mcp add fcli -- fcling -t /path/to/lab.clab.yml mcp            # straight from the nodes
 ```
 
-Other MCP clients take the same URL, or the same command, in their own configuration. The HTTP endpoint is stateless, so a server restart breaks no client session. A server started with `--api-token` needs the client to send `Authorization: Bearer <token>`.
+Other MCP clients take the same URL, or the same command, in their own configuration. The HTTP endpoint is stateless, so a server restart breaks no client session. A server that requires a token (beyond localhost, or with `--api-token`) needs the client to send `Authorization: Bearer <token>`. `fcling --server` takes the token from the URL the server prints, or reads it on the server's own machine ([server.md](server.md#security)).
 
 ## The agent
 

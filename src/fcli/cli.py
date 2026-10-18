@@ -28,7 +28,7 @@ from .checks import CHECKS, required, run_checks
 from .collect import collect
 from .gnmi.client import Tls
 from .incidents import correlate
-from .remote import Remote, RemoteError
+from .remote import LOCAL, Remote, RemoteError, find_token, keep_token, token_path
 from .report import Param, Record, Report
 from .reports import REGISTRY, bgp_rib
 from .store import BeforeHistory, Store, default_path, parse_time
@@ -55,7 +55,24 @@ class Settings:
     token: str | None = None
 
     def remote(self) -> Remote | None:
-        return Remote(self.server, self.token) if self.server else None
+        if not self.server:
+            return None
+        remote = Remote(self.server, self.token)
+        if remote.token is None and remote.local:
+            remote.token = self._kept_token()
+        return remote
+
+    def _kept_token(self) -> str | None:
+        """The token a server on this machine made up: its fabric's, or the only one kept."""
+        preferred = None
+        source = self.inventory_file or self.topo or inv.discover()
+        if source is not None:
+            try:
+                loaded = inv.from_file(source) if self.inventory_file else inv.from_clab(source)
+                preferred = token_path(default_path(loaded.name))
+            except inv.InventoryError:
+                pass
+        return find_token(preferred, default_path("").parent.glob("*.token"))
 
     def fabric(self) -> inv.Inventory:
         """The selected nodes. Loaded here, not in the group, so ``--help`` needs no inventory."""
@@ -172,6 +189,25 @@ def main(
         server=server,
         token=token,
     )
+
+
+def _broken(what: str, exc: ImportError) -> click.ClickException:
+    """Every dependency comes with fcling: one that is missing is a broken install."""
+    return click.ClickException(
+        f"{what} cannot load {exc.name or exc}: the install is incomplete; "
+        "reinstall it with `uv tool install --reinstall fcling`"
+    )
+
+
+def _login_url(host: str, port: int, token: str | None) -> str:
+    """The UI's address to open, or pass as ``--server``: with the token in it, if there is one."""
+    import socket
+
+    # Listening on every address: this machine's name is one that others reach it by.
+    name = socket.gethostname() if host in ("", "0.0.0.0", "::") else host  # noqa: S104 - compared, not bound
+    if ":" in name:
+        name = f"[{name}]"
+    return f"http://{name}:{port}/" + (f"?token={token}" if token else "")
 
 
 def _collect(
@@ -385,7 +421,9 @@ def bgp_rib_command(
     "-r", "--report", "names", multiple=True, metavar="NAME", help="reports to stream [default: all of them]"
 )
 @click.option(
-    "--api-token", envvar="FCLI_API_TOKEN", help="require this bearer token [default: none on localhost]"
+    "--api-token",
+    envvar="FCLI_API_TOKEN",
+    help="require this bearer token [default: none on localhost, else one kept next to the history]",
 )
 @click.option(
     "--persist-acks",
@@ -426,24 +464,20 @@ def serve(
         from .server import create_app, run
         from .store import AsyncStore
     except ImportError as exc:
-        raise click.ClickException(
-            f"the server needs its extra: pip install 'fcling[server]' ({exc})"
-        ) from exc
+        raise _broken("the server", exc) from exc
     unknown = [n for n in names if n not in REGISTRY]
     if unknown:
         raise click.UsageError(f"no report {', '.join(unknown)}")
     fabric = settings.fabric()
     reports = [REGISTRY[n] for n in names] or [r for r in REGISTRY.values() if not r.hidden]
-    if host not in ("127.0.0.1", "::1", "localhost") and not api_token:
-        import secrets
-
-        api_token = secrets.token_urlsafe(24)
-        err.print(
-            f"listening beyond localhost: every call needs [bold]--token {api_token}[/]", highlight=False
-        )
     if log_file and not daemon:
         raise click.UsageError("--log-file goes with --daemon")
     path = (db or default_path(fabric.name)).resolve()
+    kept = None
+    if host not in LOCAL and not api_token:
+        # Made up once and kept: a restart lets the same browsers and clients in.
+        kept = token_path(path)
+        api_token = keep_token(kept)
     if daemon:
         from .daemon import running
 
@@ -453,9 +487,11 @@ def serve(
     banner = (
         f"{fabric.name}: {len(fabric.nodes)} nodes, {len(reports)} reports, history in {path}"
         + (f", acknowledgements in {acks.path} ({len(acks.all())} kept)" if acks.path else "")
-        + f"; UI at http://{host}:{port}/, API at /api/status, MCP at /mcp"
+        + f"; UI at {_login_url(host, port, api_token)}, API at /api/status, MCP at /mcp"
+        + (f"; token kept in {kept}" if kept else "")
     )
-    err.print(banner, highlight=False)
+    # Soft-wrapped: the login URL stays one string to copy, whatever the width of the terminal.
+    err.print(banner, highlight=False, soft_wrap=True)
     ready = None
     if daemon:
         from .daemon import DaemonError, detach
@@ -915,7 +951,7 @@ def mcp_command(settings: Settings) -> None:
     try:
         from .mcp import serve_stdio
     except ImportError as exc:
-        raise click.ClickException(f"MCP needs its extra: pip install 'fcling[mcp]' ({exc})") from exc
+        raise _broken("MCP", exc) from exc
     asyncio.run(serve_stdio(_service(settings), __version__))
 
 
@@ -997,9 +1033,7 @@ def ask(
         try:
             from .agent import Agent, Conversation
         except ImportError as exc:
-            raise click.ClickException(
-                f"the agent needs its extra: pip install 'fcling[ai]' ({exc})"
-            ) from exc
+            raise _broken("the agent", exc) from exc
         from .llm import ProviderError
 
         service = _service(settings)

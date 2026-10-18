@@ -14,7 +14,7 @@ Open `http://127.0.0.1:8765/` for the web UI: topology, incidents, history, lens
 | `--db FILE` | `~/.local/state/fcli/<fabric>.db` | the history ([history.md](history.md)) |
 | `--poll SECONDS` | 10 | how often counters are read |
 | `-r REPORT` | all reports | stream only these reports; others are collected one-shot when asked |
-| `--api-token` | none on localhost | require a bearer token (`FCLI_API_TOKEN`) |
+| `--api-token` | none on localhost, else one kept in `<db>.token` | require this bearer token (`FCLI_API_TOKEN`) |
 | `--persist-acks` | off | keep acknowledged incidents across restarts, in `<db>.acks.json` beside the history |
 | `-d`, `--daemon` | off | detach from the terminal; log to `<db>.log`, pid in `<db>.pid`, beside the history |
 | `--log-file FILE` | `<db>.log` | with `--daemon`: where the log goes |
@@ -96,6 +96,16 @@ curl -N 'http://127.0.0.1:8765/api/events?report=bgp-peers'
 
 ## Security
 
-The server listens on localhost by default. When `--host` is anything else and no `--api-token` is given, it generates one and prints it. Every request then needs `Authorization: Bearer <token>` (or `?token=`), and the CLI passes `--token` / `FCLI_TOKEN`. The MCP endpoint additionally refuses requests whose `Host` or `Origin` isn't localhost when the server is local, which blocks DNS rebinding from a browser.
+The server listens on localhost by default. When `--host` is anything else, every request needs a token: `Authorization: Bearer <token>`, `?token=`, or the cookie the UI sets.
+
+Without `--api-token`, the server makes one up the first time and keeps it in `<db>.token`, next to the history, readable by its owner only. Later starts reuse it, so a restart doesn't log out browsers or break clients. Delete the file to get a new one. A token passed with `--api-token` is used as given and never written to disk.
+
+The banner prints the URL to log in with, token included, using the machine's name when listening on every address:
+
+```
+lab: 6 nodes, 30 reports, history in /home/me/.local/state/fcli/lab.db; UI at http://labhost:8765/?token=Xq…, API at /api/status, MCP at /mcp; token kept in /home/me/.local/state/fcli/lab.token
+```
+
+With `--daemon`, the same line is in the log. The CLI accepts that URL as it is: `--server 'http://labhost:8765/?token=Xq…'` (or `FCLI_SERVER`) takes the token from it, so `--token` / `FCLI_TOKEN` isn't needed. When the CLI runs on the server's own machine, it doesn't need the token at all: given a local `--server` and no token, it reads `<fabric>.token` from the state directory, or the only `*.token` file there if it can't tell the fabric. A server with `--db` elsewhere is not found this way. The MCP endpoint additionally refuses requests whose `Host` or `Origin` isn't localhost when the server is local, which blocks DNS rebinding from a browser.
 
 Everything the server does over gNMI is read-only.
