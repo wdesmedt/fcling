@@ -7,7 +7,8 @@
     GET  /api/checks                 what is wrong: findings, live or ``at`` an instant
     GET  /api/incidents              the findings grouped by root cause, each saying if acknowledged
     GET|POST|DELETE /api/acks        acknowledge an incident ({incident, note}), or no longer (?incident=)
-    GET  /api/history                the kept changes, oldest first, with their likely cause
+    GET  /api/history                the kept changes, oldest first, with their likely cause;
+                                     ?baseline=[name] only those since a baseline
     GET  /api/drift                  what differs between a baseline (or time) and now
     GET|POST /api/baselines          named instants to compare against
     GET  /api/events                 server-sent events: changes and node status
@@ -356,6 +357,15 @@ def create_app(
                     args[key] = parse_time(query[key])
         except ValueError as exc:
             raise _Error(400, str(exc)) from exc
+        if "baseline" in query:
+            # Only what changed since a baseline: a named one, or the latest when none is named.
+            if "since" in query:
+                raise _Error(400, "say since=<time> or baseline=<name>, not both")
+            name = query["baseline"]
+            kept = await (store().run(Store.baseline, name) if name else store().run(Store.latest_baseline))
+            if kept is None:
+                raise _Error(404, f"no baseline {name!r}" if name else "no baseline is kept")
+            args["since"] = kept["ts"]
         return await store().run(views.history_with_causes, **args)
 
     async def drift(request: Request) -> Any:

@@ -96,6 +96,22 @@ def test_history_and_state_at(client: TestClient, target: FakeTarget) -> None:
     assert {r["peer"]: r["state"] for r in then["records"]}["10.0.0.2"] == "active"
 
 
+def test_history_since_a_baseline(client: TestClient, target: FakeTarget) -> None:
+    assert client.get("/api/history", params={"baseline": ""}).status_code == 404
+    assert client.post("/api/baselines", json={"name": "old", "at": "1h"}).status_code == 200
+    assert client.post("/api/baselines", json={"name": "now"}).status_code == 200
+    target.push({PEER.format("10.0.0.2") + "/session-state": "established"})
+    _until(lambda: client.get("/api/history", params={"baseline": "now"}).json())
+    # Not the first sync from before it: only the change since. No name: the latest baseline.
+    for name in ("now", ""):
+        (change,) = client.get("/api/history", params={"baseline": name, "report": "bgp-peers"}).json()
+        assert change["op"] == "change" and change["after"]["state"] == "established"
+    assert len(client.get("/api/history", params={"baseline": "old"}).json()) > 1
+    missing = client.get("/api/history", params={"baseline": "never"})
+    assert missing.status_code == 404 and "no baseline 'never'" in missing.json()["error"]
+    assert client.get("/api/history", params={"baseline": "now", "since": "1h"}).status_code == 400
+
+
 def test_unknown_report_and_bad_time(client: TestClient) -> None:
     assert client.get("/api/reports/nope").status_code == 404
     assert client.get("/api/history", params={"since": "yesterday-ish"}).status_code == 400
@@ -434,3 +450,23 @@ def test_configuration_diffs(target: FakeTarget, tmp_path: Path) -> None:
         (commit,) = client.get("/api/history", params={"report": "config-commits"}).json()
         assert (commit["origin"], commit["commit"]) == ("config", {"node": "leaf1", "id": 8})
     store.close()
+
+
+def test_history_since_a_baseline_through_the_server(served: str, target: FakeTarget) -> None:
+    from click.testing import CliRunner
+
+    from fcli.cli import main
+
+    runner = CliRunner()
+    none = runner.invoke(main, ["--server", served, "history", "--since-baseline"])
+    assert none.exit_code == 2 and "no baseline is kept" in none.output
+    assert runner.invoke(main, ["--server", served, "baseline", "b1"]).exit_code == 0
+    target.push({PEER.format("10.0.0.2") + "/session-state": "established"})
+    _until(lambda: Remote(served).history(baseline="b1"))
+    for args in (["--since-baseline"], ["--since-baseline", "b1", "-r", "bgp-peers"]):
+        result = runner.invoke(main, ["--server", served, "-o", "json", "history", *args])
+        assert result.exit_code == 0, result.output
+        changes = json.loads(result.stdout)
+        assert [(c["op"], c["after"]["state"]) for c in changes] == [("change", "established")]
+    unknown = runner.invoke(main, ["--server", served, "history", "--since-baseline", "nope"])
+    assert unknown.exit_code == 2 and "no baseline 'nope'" in unknown.output

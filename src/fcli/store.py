@@ -291,6 +291,11 @@ class Store:
         row = self.db.execute("SELECT * FROM baselines WHERE name = ?", (name,)).fetchone()
         return dict(row) if row else None
 
+    def latest_baseline(self) -> dict[str, Any] | None:
+        """The baseline at the latest instant: the one "since the baseline" means."""
+        row = self.db.execute("SELECT * FROM baselines ORDER BY ts DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
     def delete_baseline(self, name: str) -> bool:
         with self.db:
             return self.db.execute("DELETE FROM baselines WHERE name = ?", (name,)).rowcount > 0

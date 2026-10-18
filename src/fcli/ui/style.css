@@ -1832,6 +1832,11 @@ tr.carrier-row > td {
   border-radius: 0 6px 6px 0;
 }
 
+.segmented button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
 .segmented button.on {
   background: var(--accent);
   border-color: var(--accent);

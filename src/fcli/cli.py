@@ -558,6 +558,15 @@ def _print_changes(changes: list[dict[str, Any]], output: str) -> None:
 
 @main.command()
 @click.option("--since", default="1h", show_default=True, metavar="TIME", help="1h, 30m, 2d, or a date")
+@click.option(
+    "--since-baseline",
+    "baseline",
+    is_flag=False,
+    flag_value="",
+    default=None,
+    metavar="[NAME]",
+    help="only what changed since that baseline [default: the latest one]",
+)
 @click.option("--until", metavar="TIME")
 @click.option("-n", "--node", "nodes", multiple=True)
 @click.option("-r", "--report", "reports", multiple=True)
@@ -567,6 +576,7 @@ def _print_changes(changes: list[dict[str, Any]], output: str) -> None:
 def history(
     settings: Settings,
     since: str,
+    baseline: str | None,
     until: str | None,
     nodes: tuple[str, ...],
     reports: tuple[str, ...],
@@ -576,7 +586,7 @@ def history(
     """What changed: the history the server keeps"""
     remote = settings.remote()
     try:
-        start = parse_time(since)
+        start = parse_time(since) if baseline is None else _baseline_at(settings, baseline)
         end = parse_time(until) if until else None
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -615,6 +625,23 @@ def history(
             pass
         except RemoteError as exc:
             raise click.ClickException(str(exc)) from exc
+
+
+def _baseline_at(settings: Settings, name: str) -> float:
+    """When baseline *name* was set, or the latest baseline when *name* is empty."""
+    if settings.remote() is not None:
+        kept = _remote_get(settings, "/api/baselines", [])
+    else:
+        store = _local_store(settings)
+        try:
+            kept = store.baselines()
+        finally:
+            store.close()
+    picked = [b for b in kept if b["name"] == name] if name else kept[-1:]
+    if not picked:
+        hint = "no baseline is kept: set one with `fcling baseline`"
+        raise click.UsageError(f"no baseline {name!r}" if name else hint)
+    return float(picked[0]["ts"])
 
 
 # --------------------------------------------------------------------------- #

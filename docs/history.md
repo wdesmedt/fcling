@@ -105,3 +105,10 @@ fcling drift 14:00 --to 15:00
 ```
 
 Drift compares the two end states, record by record, ignoring volatile fields. A session that went down and came back in between is no drift; `history` shows that it happened.
+
+`history` can start at a baseline too: `--since-baseline` lists only what changed since the latest baseline, and `--since-baseline pre-mtu` since that one. Over HTTP it is `/api/history?baseline=pre-mtu`, or `baseline=` for the latest.
+
+```bash
+fcling baseline before-work
+fcling history --since-baseline
+```
