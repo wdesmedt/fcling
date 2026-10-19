@@ -137,7 +137,7 @@ def attribute(
 ) -> list[dict[str, Any]]:
     """*changes*, each with the ``cause`` that most likely made it and its ``origin``:
     ``config`` for a commit and what one caused, ``unplanned`` for the rest.
-    ``commit`` names the commit, ``{"node", "id"}``, for its configuration diff.
+    ``commit`` names the commit, ``{"node", "id", "seen"}``, for its configuration diff.
 
     A change is put down to the latest commit shortly before it on its own
     node or - with *ends* - on a node at the far end of its cable or session:
@@ -158,7 +158,7 @@ def attribute(
         commit_ref = None
         if change["report"] == "config-commits":
             record = change.get("after") or change.get("before") or {}
-            commit_ref = {"node": change["node"], "id": record.get("id")}
+            commit_ref = {"node": change["node"], "id": record.get("id"), "seen": change["ts"]}
         elif by_node:
             nodes = {change["node"]}
             if ends is not None and any(n != change["node"] for n in by_node):
@@ -172,7 +172,7 @@ def attribute(
                 cause = f"commit {a.get('id')}{where} by {a.get('username') or '?'}"
                 if a.get("comment"):
                     cause += f" ({a['comment']})"
-                commit_ref = {"node": commit["node"], "id": a.get("id")}
+                commit_ref = {"node": commit["node"], "id": a.get("id"), "seen": commit["ts"]}
         origin = CONFIG if commit_ref else UNPLANNED
         out.append({**change, "cause": cause, "origin": origin, "commit": commit_ref})
     return out
@@ -230,7 +230,12 @@ def _config_meta(kept: Mapping[str, Any] | None) -> dict[str, Any] | None:
 
 
 def config_diff(
-    store: Store, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+    store: Store,
+    node: str,
+    commit: int | None = None,
+    base: int | None = None,
+    context: int = 3,
+    seen: float | None = None,
 ) -> dict[str, Any]:
     """What a commit did to *node*'s configuration, as a side-by-side diff.
 
@@ -239,10 +244,13 @@ def config_diff(
     it - or with the one kept after commit *base*. Several commits made
     between two reads are one diff; ``commits`` lists them. With nothing kept
     earlier, ``before`` is ``None`` and there are no rows.
+
+    A redeployed node numbers its commits from 1 again: *seen*, when the commit
+    was seen, says which commit *commit* is; without it, the latest by that id.
     """
     from . import config
 
-    after = store.config(node, commit_id=commit) if commit is not None else store.config(node)
+    after = store.config(node, commit_id=commit, seen=seen) if commit is not None else store.config(node)
     if after is None:
         raise LookupError(
             f"no configuration of {node} kept" + (f" from commit {commit} on" if commit is not None else "")
@@ -252,12 +260,23 @@ def config_diff(
     )
     if before is not None and before["ts"] >= after["ts"]:
         before, after = after, before
-    low = (before or {}).get("commit_id") or 0
     high = after.get("commit_id") or 0
+    low = (before or {}).get("commit_id") or 0
+    if low > high:
+        low = 0  # before the ids started over
+    # Between the two in time too: ids come again after a redeploy.
+    since = before["ts"] if before is not None else None
+    until = min((c["ts"] for c in store.configs([node]) if c["ts"] > after["ts"]), default=None)
     commits: dict[int, dict[str, Any]] = {}
     for change in store.history(nodes=[node], reports=["config-commits"], limit=100_000):
         record = change.get("after") or {}
-        if change["op"] != "remove" and isinstance(record.get("id"), int) and low < record["id"] <= high:
+        if (
+            change["op"] != "remove"
+            and isinstance(record.get("id"), int)
+            and low < record["id"] <= high
+            and (since is None or change["ts"] > since)
+            and (until is None or change["ts"] < until)
+        ):
             commits[record["id"]] = record
     answer: dict[str, Any] = {
         "node": node,

@@ -301,13 +301,25 @@ class Store:
         return [dict(r) for r in rows]
 
     def config(
-        self, node: str, commit_id: int | None = None, before: float | None = None
+        self,
+        node: str,
+        commit_id: int | None = None,
+        before: float | None = None,
+        seen: float | None = None,
     ) -> dict[str, Any] | None:
         """A kept configuration of *node*, with its tree: the latest; the first kept at or after
-        *commit_id*; or the last kept before *before*."""
+        *commit_id*; or the last kept before *before*.
+
+        A redeployed node numbers its commits from 1 again, so *commit_id* is looked
+        up within one run of ids: the latest that reaches it, or - with *seen*, when
+        the commit was seen - the first kept from then on, before the ids start over.
+        """
         args: list[Any] = []
         if commit_id is not None:
-            sql, args = "commit_id >= ? ORDER BY ts ASC", [commit_id]
+            ts = self._config_from(node, commit_id, seen)
+            if ts is None:
+                return None
+            sql, args = "ts = ?", [ts]
         elif before is not None:
             sql, args = "ts < ? ORDER BY ts DESC", [before]
         else:
@@ -320,6 +332,26 @@ class Store:
         out = {k: row[k] for k in ("node", "ts", "commit_id", "digest", "lines")}
         out["tree"] = json.loads(zlib.decompress(row["tree"]))
         return out
+
+    def _config_from(self, node: str, commit_id: int, seen: float | None) -> float | None:
+        """When the first configuration of *node* kept from *commit_id* on was kept."""
+        rows = self.db.execute(
+            "SELECT ts, commit_id FROM configs WHERE node = ? AND commit_id IS NOT NULL"
+            + (" AND ts >= ?" if seen is not None else "")
+            + " ORDER BY ts",
+            (node,) if seen is None else (node, seen),
+        )
+        runs: list[list[tuple[float, int]]] = []
+        for ts, cid in rows:
+            if not runs or cid < runs[-1][-1][1]:
+                runs.append([])
+            runs[-1].append((ts, cid))
+        # Seen at a time, the commit is in the run then going on; otherwise the latest that has it.
+        for run in runs[:1] if seen is not None else reversed(runs):
+            for ts, cid in run:
+                if cid >= commit_id:
+                    return float(ts)
+        return None
 
     # ------------------------------------------------------------- baselines
 

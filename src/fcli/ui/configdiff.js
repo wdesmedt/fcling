@@ -32,19 +32,20 @@ function Cell({ side, row }) {
 
 const label = (kept) => (kept ? `after commit ${kept.commit_id ?? "?"} · ${clock(kept.ts)}` : "");
 
-/** The diff of commit *commit* on *node*, fetched when it is shown. */
-export function ConfigDiff({ node, commit }) {
+/** The diff of commit *commit* on *node*, fetched when it is shown. *seen*, when the commit
+ *  was seen, tells it from a commit of the same id before the node was redeployed. */
+export function ConfigDiff({ node, commit, seen }) {
   const [whole, setWhole] = useState(false);
   const [state, setState] = useState({ diff: null, error: "" });
   useEffect(() => {
     let current = true;
-    get("/api/configs/diff", { node, commit: commit ?? "", context: whole ? WHOLE : 3 })
+    get("/api/configs/diff", { node, commit: commit ?? "", seen: seen ?? "", context: whole ? WHOLE : 3 })
       .then((diff) => current && setState({ diff, error: "" }))
       .catch((e) => current && setState({ diff: null, error: e.message }));
     return () => {
       current = false;
     };
-  }, [node, commit, whole]);
+  }, [node, commit, seen, whole]);
   const { diff, error } = state;
   if (error) return html`<p class="error-text">${error}</p>`;
   if (!diff) return html`<p class="muted">Reading the configurations…</p>`;

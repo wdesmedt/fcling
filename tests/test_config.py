@@ -163,6 +163,36 @@ def test_a_commit_diff_names_every_commit_it_spans(tmp_path: Path) -> None:
         views.config_diff(store, "leaf1", 7)
 
 
+def test_a_redeployed_node_numbers_its_commits_again(tmp_path: Path) -> None:
+    """Commit 3 after a redeploy is not commit 3 from before it, nor a diff of every id since."""
+    store = Store(tmp_path / "h.db")
+    trees = []
+    for state in ("enable", "disable", "enable", "disable"):
+        tree = copy.deepcopy(_tree(CONFIG))
+        tree["interface"][0]["admin-state"] = state
+        tree["extra"] = {"n": len(trees)}
+        trees.append(tree)
+    # The first life: commits 2 and 3 (and 24, its last).
+    store.keep_config("leaf1", 100.0, 2, trees[0], config.digest(trees[0]), 9)
+    _commit(store, 199.0, 3, user="old")
+    store.keep_config("leaf1", 200.0, 24, trees[1], config.digest(trees[1]), 9)
+    # Redeployed: commits 1 and 2 come again as changes, then admin's commit 3.
+    store.keep_config("leaf1", 300.0, 2, trees[2], config.digest(trees[2]), 9)
+    _commit(store, 399.0, 3, user="admin")
+    store.keep_config("leaf1", 400.0, 3, trees[3], config.digest(trees[3]), 9)
+
+    latest = views.config_diff(store, "leaf1", 3)
+    assert (latest["before"]["ts"], latest["after"]["ts"]) == (300.0, 400.0)
+    assert [(c["id"], c["username"]) for c in latest["commits"]] == [(3, "admin")]
+    old = views.config_diff(store, "leaf1", 3, seen=199.0)
+    assert (old["before"]["ts"], old["after"]["ts"]) == (100.0, 200.0)
+    assert [(c["id"], c["username"]) for c in old["commits"]] == [(3, "old")]
+    # The redeploy itself, against the last configuration of the first life.
+    again = views.config_diff(store, "leaf1", 2, seen=250.0)
+    assert (again["before"]["ts"], again["after"]["ts"]) == (200.0, 300.0)
+    assert store.config("leaf1", commit_id=25) is None
+
+
 def test_changes_after_a_commit_are_config_the_rest_unplanned() -> None:
     commit = {
         "ts": 100.0,
@@ -180,8 +210,10 @@ def test_changes_after_a_commit_are_config_the_rest_unplanned() -> None:
     ]
     out = views.attribute(changes, [commit])
     assert [c["origin"] for c in out] == ["config", "config", "config", "unplanned", "unplanned"]
-    assert out[0]["commit"] == {"node": "leaf1", "id": 9} and not out[0]["cause"]
-    assert out[1]["commit"] == {"node": "leaf1", "id": 9} and out[1]["cause"] == "commit 9 by a"
+    assert out[0]["commit"] == {"node": "leaf1", "id": 9, "seen": 100.0} and not out[0]["cause"]
+    assert (
+        out[1]["commit"] == {"node": "leaf1", "id": 9, "seen": 100.0} and out[1]["cause"] == "commit 9 by a"
+    )
     assert out[3]["commit"] is None
 
 
@@ -373,7 +405,7 @@ def test_a_commit_is_blamed_for_what_it_did_at_the_far_end() -> None:
     out = views.attribute(changes, [commit], ends)
     assert [c["origin"] for c in out] == ["config"] * 4 + ["unplanned"] * 3
     assert out[0]["cause"] == "commit 7 on spine1 by ops (rr policy)"
-    assert out[0]["commit"] == {"node": "spine1", "id": 7}
+    assert out[0]["commit"] == {"node": "spine1", "id": 7, "seen": 100.0}
     # Without the far ends, only a commit on the change's own node counts.
     assert {c["origin"] for c in views.attribute(changes, [commit])} == {"unplanned"}
 
@@ -399,8 +431,10 @@ def test_the_latest_commit_at_either_end_is_the_cause() -> None:
     assert views.attribute([change], [own, _spine_commit(100.0)], ends)[0]["commit"] == {
         "node": "leaf1",
         "id": 3,
+        "seen": 110.0,
     }
     assert views.attribute([change], [own, _spine_commit(120.0)], ends)[0]["commit"] == {
         "node": "spine1",
         "id": 7,
+        "seen": 120.0,
     }

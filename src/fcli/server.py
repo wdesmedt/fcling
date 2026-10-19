@@ -408,9 +408,10 @@ def create_app(
             commit = int(query["commit"]) if query.get("commit") else None
             base = int(query["base"]) if query.get("base") else None
             context = int(query.get("context", "3"))
+            seen = float(query["seen"]) if query.get("seen") else None
         except ValueError as exc:
-            raise _Error(400, f"commit, base and context are numbers: {exc}") from exc
-        return await service.config_diff(node, commit, base, context)
+            raise _Error(400, f"commit, base, context and seen are numbers: {exc}") from exc
+        return await service.config_diff(node, commit, base, context, seen)
 
     async def events(request: Request) -> Response:
         reports_wanted = set(query_list(request, "report"))

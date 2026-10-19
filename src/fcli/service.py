@@ -147,7 +147,12 @@ class Service(Protocol):
     async def configs(self, nodes: Sequence[str] = ()) -> list[dict[str, Any]]: ...
 
     async def config_diff(
-        self, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+        self,
+        node: str,
+        commit: int | None = None,
+        base: int | None = None,
+        context: int = 3,
+        seen: float | None = None,
     ) -> dict[str, Any]: ...
 
     async def lens(
@@ -521,10 +526,15 @@ class EngineService:
         return await self._store().run(views.configs, list(nodes))  # type: ignore[no-any-return]
 
     async def config_diff(
-        self, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+        self,
+        node: str,
+        commit: int | None = None,
+        base: int | None = None,
+        context: int = 3,
+        seen: float | None = None,
     ) -> dict[str, Any]:
         try:
-            return await self._store().run(views.config_diff, node, commit, base, context)  # type: ignore[no-any-return]
+            return await self._store().run(views.config_diff, node, commit, base, context, seen)  # type: ignore[no-any-return]
         except LookupError as exc:
             raise ServiceError(str(exc)) from exc
 
@@ -632,11 +642,17 @@ class RemoteService:
         return await self._get("/api/configs", [("node", n) for n in nodes])  # type: ignore[no-any-return]
 
     async def config_diff(
-        self, node: str, commit: int | None = None, base: int | None = None, context: int = 3
+        self,
+        node: str,
+        commit: int | None = None,
+        base: int | None = None,
+        context: int = 3,
+        seen: float | None = None,
     ) -> dict[str, Any]:
         query = [("node", node), ("context", str(context))]
         query += [("commit", str(commit))] if commit is not None else []
         query += [("base", str(base))] if base is not None else []
+        query += [("seen", str(seen))] if seen is not None else []
         return await self._get("/api/configs/diff", query)  # type: ignore[no-any-return]
 
     async def lens(

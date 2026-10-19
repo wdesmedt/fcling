@@ -464,10 +464,20 @@ def test_configuration_diffs(target: FakeTarget, tmp_path: Path) -> None:
             "set / interface ethernet-1/1 admin-state enable",
             "set / interface ethernet-1/1 admin-state disable",
         )
+        assert (
+            client.get("/api/configs/diff", params={"node": "leaf1", "commit": "8", "seen": "199.0"}).json()
+            == diff
+        )
+        assert (
+            client.get(
+                "/api/configs/diff", params={"node": "leaf1", "commit": "8", "seen": "201"}
+            ).status_code
+            == 400
+        )
         assert client.get("/api/configs/diff", params={"node": "leaf1", "commit": "9"}).status_code == 400
         assert client.get("/api/configs/diff").status_code == 400
         (commit,) = client.get("/api/history", params={"report": "config-commits"}).json()
-        assert (commit["origin"], commit["commit"]) == ("config", {"node": "leaf1", "id": 8})
+        assert (commit["origin"], commit["commit"]) == ("config", {"node": "leaf1", "id": 8, "seen": 199.0})
     store.close()
 
 
