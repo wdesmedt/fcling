@@ -35,6 +35,8 @@ Where the answers come from:
 
 ## MCP
 
+An agent pointed at a running `fcling serve` should start with its MCP endpoint, `/mcp`: the tools describe themselves, with their arguments' JSON schemas. One that can only make HTTP requests finds the same answers in the plain API, which describes itself at `/api/openapi.json` (OpenAPI 3.1; `GET /api` points at both, and neither needs a token) ([server.md](server.md#http-api)).
+
 From a running `fcling serve`, over HTTP:
 
 ```bash

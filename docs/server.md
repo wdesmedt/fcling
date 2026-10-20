@@ -55,17 +55,23 @@ Each node uses about 2 gNMI sessions (SR Linux allows 20 per target, shared by a
 
 ## HTTP API
 
+The API describes itself. An agent should use the MCP tools at `/mcp` first ([ai.md](ai.md)): they are the same answers, compacted for a model. A script or an agent without MCP starts at `GET /api`, which points at `/mcp` and at `GET /api/openapi.json`: every `/api` route as OpenAPI 3.1, with its query parameters, the bearer token scheme, the report and lens names, and the JSON schema of their records. Both need no token, since they say how to ask and nothing about the fabric. `GET /api/reports` and `GET /api/lenses` add each report's and lens's own parameters.
+
+The routes and that description come from one table, `ENDPOINTS` in `src/fcli/api.py`, so a route can't be served without being described.
+
 Every endpoint takes `inv=KEY=GLOB` and `node=NAME`, both repeatable, to narrow the nodes.
 
 | | |
 |---|---|
+| `GET /api` | where to start: the paths of the OpenAPI description and of MCP; no token needed |
+| `GET /api/openapi.json` | this API as OpenAPI 3.1; no token needed |
 | `GET /api/status` | the fabric, its nodes with their state (`connecting`, `syncing`, `live`, `down` with the reason), the streamed reports, and the count of open incidents |
 | `GET /api/reports` | every report: columns, parameters, key and volatile fields, record JSON schema |
 | `GET /api/reports/{name}` | its records. Live; `?at=TIME` from history; with report parameters (`?address=10.0.0.1`), collected on the spot. `source` says which of the three it was. `?table=1` adds `columns` and `rows`: the CLI's table, as text. |
 | `GET /api/checks` | findings, with when each was raised (`?at=`, `?check=`) |
 | `GET /api/incidents` | findings grouped by root cause (`?at=`); live, each says whether it is `acknowledged` |
 | `GET/POST/DELETE /api/acks` | the acknowledged findings; `POST {"incident": id, "note": ""}` acknowledges an open incident, `DELETE ?incident=id` takes it off |
-| `GET /api/history` | changes, oldest first, each with its likely cause and `origin` (`config` or `unplanned`) (`since`, `until`, `report`, `limit`, `after`) |
+| `GET /api/history` | changes, oldest first, each with its likely cause and `origin` (`config` or `unplanned`) (`since`, `until`, `baseline`, `report`, `q`, `limit`, `after`) |
 | `GET /api/lenses` | every lens, with its arguments, columns and record JSON schema |
 | `GET /api/lenses/{name}` | a lens's records: its arguments as query parameters (`?address=10.1.3.13`), `?at=` from history ([lenses.md](lenses.md)); `?table=1` as for reports |
 | `GET /api/topology` | the fabric as a graph: nodes with tier and health, links, clients, segments, components (`?at=`) |

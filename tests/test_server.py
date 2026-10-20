@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -544,3 +545,42 @@ def test_a_commit_diff_by_when_it_was_made(served: str, tmp_path: Path) -> None:
     assert json.loads(result.output)["after"]["ts"] == 252.0
     both = runner.invoke(main, ["--server", served, "config-diff", "leaf1", "3", "--at", "250"])
     assert both.exit_code == 2 and "not both" in both.output
+
+
+def test_every_api_route_is_described(target: FakeTarget, tmp_path: Path) -> None:
+    from starlette.routing import Route
+
+    client, store = _client(target, tmp_path)
+    served = {
+        (r.path, m)
+        for r in client.app.routes  # type: ignore[attr-defined]
+        if isinstance(r, Route) and r.path.startswith("/api")
+        for m in (r.methods or ()) - {"HEAD"}
+    }
+    with client:
+        spec = client.get("/api/openapi.json").json()
+    described = {(path, m.upper()) for path, ops in spec["paths"].items() for m in ops}
+    assert served == described
+    store.close()
+
+
+def test_the_api_describes_itself_without_a_token(target: FakeTarget, tmp_path: Path) -> None:
+    client, store = _client(target, tmp_path, token="s3cret")
+    with client:
+        assert client.get("/api/status").status_code == 401
+        start = client.get("/api").json()
+        assert start["mcp"] == "/mcp" and start["openapi"] == "/api/openapi.json"
+        spec = client.get(start["openapi"]).json()
+    assert spec["openapi"].startswith("3.1")
+    assert spec["components"]["securitySchemes"]["bearer"]["scheme"] == "bearer"
+    history = {p["name"] for p in spec["paths"]["/api/history"]["get"]["parameters"]}
+    assert {"since", "until", "report", "node", "q", "baseline", "limit", "after"} <= history
+    records = spec["paths"]["/api/reports/{name}"]["get"]
+    assert set(records["parameters"][0]["schema"]["enum"]) == set(REGISTRY)
+    schemas = spec["components"]["schemas"]
+    for ref in records["x-records"].values():
+        assert ref["$ref"].removeprefix("#/components/schemas/") in schemas
+    # Every reference inside the record schemas resolves in the document.
+    refs = re.findall(r'"\$ref": "#/components/schemas/([^"]+)"', json.dumps(spec))
+    assert set(refs) <= set(schemas)
+    store.close()

@@ -1,5 +1,7 @@
 """HTTP, SSE and MCP over the engine: one process, one live state, every client.
 
+    GET  /api                        where to start: the description below, and /mcp
+    GET  /api/openapi.json           every /api route as OpenAPI 3.1 (see :mod:`fcli.api`)
     GET  /api/status                 the fabric, its nodes, how each is doing, open incidents
     GET  /api/reports                every report: columns, parameters, record schema
     GET  /api/reports/{name}         its records: live, at an instant (``at``), or
@@ -10,6 +12,7 @@
     GET  /api/history                the kept changes, oldest first, with their likely cause;
                                      ?baseline=[name] only those since a baseline;
                                      ?q=text only those it is found in
+    GET  /api/configs[/diff]         the configurations kept; what a commit changed
     GET  /api/drift                  what differs between a baseline (or time) and now
     GET|POST /api/baselines          named instants to compare against
     GET  /api/events                 server-sent events: changes and node status
@@ -24,7 +27,7 @@ what the MCP tools and the agent use: they cannot see a different fabric.
 
 Bound to localhost unless told otherwise; ``token`` makes every call carry
 ``Authorization: Bearer <token>`` (or ``?token=``, or the cookie a right
-``?token=`` sets). The UI's own files hold no data and need none: open it once
+``?token=`` sets). The UI's own files and the API's description hold no data and need none: open it once
 with ``/?token=...`` and that browser's tabs carry the cookie.
 """
 
@@ -53,7 +56,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import render, views
+from . import api, render, views
 from .acks import AckStore
 from .engine import Engine
 from .inventory import Inventory
@@ -169,8 +172,12 @@ async def _table(
 
 
 def _public(path: str) -> bool:
-    """The UI's own files: the same for everyone, and no answer about the fabric."""
-    return path == "/" or path.startswith("/ui/")
+    """The UI's own files and the API's description: the same for everyone, and no answer about the fabric.
+
+    The description holds only code - routes, report and lens names, record schemas - so a
+    client can learn how to ask, and that it needs a token, before it has one.
+    """
+    return path in ("/", "/api", "/api/openapi.json") or path.startswith("/ui/")
 
 
 def _sse(event: dict[str, Any]) -> str:
@@ -565,24 +572,37 @@ def create_app(
                     with contextlib.suppress(asyncio.CancelledError):
                         await task
 
-    routes = [
-        Route("/api/status", handled(status)),
-        Route("/api/reports", handled(reports)),
-        Route("/api/reports/{name}", handled(report_records)),
-        Route("/api/checks", handled(checks)),
-        Route("/api/incidents", handled(incidents)),
-        Route("/api/acks", handled(acknowledgements), methods=["GET", "POST", "DELETE"]),
-        Route("/api/history", handled(history)),
-        Route("/api/drift", handled(drift)),
-        Route("/api/configs", handled(configs)),
-        Route("/api/configs/diff", handled(config_diff)),
-        Route("/api/baselines", handled(baselines), methods=["GET", "POST"]),
-        Route("/api/baselines/{name}", handled(baselines), methods=["DELETE"]),
-        Route("/api/events", handled(events)),
-        Route("/api/lenses", handled(lenses)),
-        Route("/api/lenses/{name}", handled(lens)),
-        Route("/api/topology", handled(topology)),
-        Route("/api/chat", handled(chat), methods=["POST"]),
+    async def index(request: Request) -> Any:
+        return api.index()
+
+    async def openapi(request: Request) -> Any:
+        return api.openapi()
+
+    handlers: dict[str, Callable[[Request], Awaitable[Any]]] = {
+        "index": index,
+        "openapi": openapi,
+        "status": status,
+        "reports": reports,
+        "report_records": report_records,
+        "checks": checks,
+        "incidents": incidents,
+        "acknowledgements": acknowledgements,
+        "history": history,
+        "drift": drift,
+        "configs": configs,
+        "config_diff": config_diff,
+        "baselines": baselines,
+        "events": events,
+        "lenses": lenses,
+        "lens": lens,
+        "topology": topology,
+        "chat": chat,
+    }
+    # Every /api route from the one table its description is made from.
+    routes: list[Route | Mount] = [
+        Route(e.path, handled(handlers[e.handler]), methods=list(e.methods)) for e in api.ENDPOINTS
+    ]
+    routes += [
         Route("/", lambda request: FileResponse(UI / "index.html", headers={"cache-control": "no-cache"})),
         Mount("/ui", _Revalidated(directory=UI)),
     ]
