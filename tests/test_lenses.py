@@ -85,6 +85,67 @@ def test_endpoints_are_listed_where_they_are_attached() -> None:
     assert (a.ip_vrf, a.mac_vrf, a.lldp) == ("ipvrf-1", "macvrf-1", ("hostA",))
 
 
+def _with_ce(peer: bool, prefixes: int) -> Fabric:
+    """A CE at 10.1.1.50 behind leaf3's access port: ipvrf-1 peers with it over
+    BGP if *peer*, and routes that many prefixes over it."""
+    from fcli.reports.layer2 import MacEntry, NeighborEntry
+    from fcli.reports.routing import RouteNextHop
+
+    ce = "DD:00:00:00:00:04"
+    records = lens_fabric.records()
+    records["mac"].append(
+        MacEntry(node="leaf3", ni="macvrf-1", address=ce, type="learnt", interface="ethernet-1/1.1")
+    )
+    records["arp"].append(
+        NeighborEntry(
+            node="leaf3",
+            interface="irb0.1",
+            nis=("ipvrf-1", "macvrf-1"),
+            address="10.1.1.50",
+            mac=ce,
+            origin="dynamic",
+        )
+    )
+    records["ipv4-rib"] += [
+        Route(
+            node="leaf3",
+            ni="ipvrf-1",
+            prefix=f"192.168.{n}.0/24",
+            type="bgp" if peer else "static",
+            active=True,
+            next_hops=(RouteNextHop(address="10.1.1.50"),),
+        )
+        for n in range(prefixes)
+    ]
+    records["services"] = [
+        s.model_copy(update={"bgp_peers": ("10.1.1.50",)})
+        if peer and (s.node, s.name) == ("leaf3", "ipvrf-1")
+        else s
+        for s in records["services"]
+    ]
+    return dataclasses.replace(fabric(), records=records)
+
+
+def _roles(fabric: Fabric) -> dict[str, tuple]:
+    return {e.ip or e.mac: (e.role, e.why) for e in LENSES["endpoints"].run(fabric) if e.node == "leaf3"}
+
+
+def test_an_endpoint_the_instance_peers_with_or_routes_over_is_a_router() -> None:
+    assert _roles(_with_ce(peer=True, prefixes=1)) == {
+        "10.1.1.20": ("host", ()),
+        "10.1.1.50": ("router", ("bgp peer", "next-hop of 192.168.0.0/24")),
+        # Only bridged: nothing says what it is.
+        DUP: ("", ()),
+    }
+    # A static route over it is enough, and a long list is cut short.
+    assert _roles(_with_ce(peer=False, prefixes=5))["10.1.1.50"] == (
+        "router",
+        ("next-hop of 192.168.0.0/24, 192.168.1.0/24, 192.168.2.0/24 (+2 more)",),
+    )
+    # A peer with no routes over it is still a router.
+    assert _roles(_with_ce(peer=True, prefixes=0))["10.1.1.50"] == ("router", ("bgp peer",))
+
+
 def _hops(source: str, destination: str, ni: str | None = None) -> list[tuple]:
     return [
         (h.hop, h.lookup, h.node, h.ni, h.outcome, h.peer or h.endpoint or h.resumes_in or h.egress)

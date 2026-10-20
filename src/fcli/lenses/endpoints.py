@@ -2,10 +2,12 @@
 
 A host is what an ARP or ND entry binds on an access subinterface or an irb,
 placed by its MAC in the bridge table; a host that only bridges is listed by
-its MAC alone. Left out: management ports, the links between fabric nodes,
-and hosts another node learned over EVPN - each host is listed where it is
-attached, which on a multihomed segment is every node of the segment, even
-the ones that learned it from their peer.
+its MAC alone. A host the instance peers with over BGP, or routes other
+prefixes over, is a router; one that only bridges cannot be told. Left out:
+management ports, the links between fabric nodes, and hosts another node
+learned over EVPN - each host is listed where it is attached, which on a
+multihomed segment is every node of the segment, even the ones that learned
+it from their peer.
 """
 
 from __future__ import annotations
@@ -16,7 +18,10 @@ from typing import ClassVar
 from ..fabric import Fabric, out_of_band, parent
 from ..lens import lens
 from ..report import Column, Record
-from .common import Index, mac
+from .common import Index, ip, mac
+
+#: How many of the prefixes a router is the next-hop of are named.
+_SHOWN = 3
 
 
 class Endpoint(Record):
@@ -41,12 +46,18 @@ class Endpoint(Record):
     es: str = ""
     #: What the host calls itself over LLDP, where it runs it.
     lldp: tuple[str, ...] = ()
+    #: ``router``: its IP-VRF peers with it over BGP, or routes over it.
+    #: ``host``: neither. Empty for a host that only bridges.
+    role: str = ""
+    #: Why it is a router: ``bgp peer``, and the prefixes routed over it.
+    why: tuple[str, ...] = ()
 
 
 _COLUMNS = (
     Column("IP", "ip"),
     Column("MAC", "mac"),
     Column("type", "origin"),
+    Column("role", "role"),
     Column("L3-interface", "l3_interface"),
     Column("subinterface", "subinterface"),
     Column("IP-VRF", "ip_vrf"),
@@ -54,13 +65,14 @@ _COLUMNS = (
     Column("learned", "learned"),
     Column("ES", lambda e: e.es or e.esi),
     Column("LLDP", lambda e: list(e.lldp)),
+    Column("why", lambda e: list(e.why)),
 )
 
 
 @lens(
     "endpoints",
     "Every host attached to the fabric, where it is attached",
-    requires=("arp", "nd", "mac", "es", "es-dest", "services", "lldp", "lag"),
+    requires=("arp", "nd", "mac", "es", "es-dest", "services", "lldp", "lag", "ipv4-rib", "ipv6-rib"),
     record=Endpoint,
     columns=_COLUMNS,
 )
@@ -100,6 +112,20 @@ def endpoints(fabric: Fabric) -> Iterator[Endpoint]:
                 }
         return None
 
+    def role(node: str, ip_vrf: str, address: str) -> dict[str, object]:
+        """A router if *ip_vrf* on *node* peers with *address* over BGP or routes over it."""
+        at = ip(address)
+        service = index.services.get((node, ip_vrf))
+        why: list[str] = []
+        if at is not None and service and any(ip(p) == at for p in service.bgp_peers):
+            why.append("bgp peer")
+        prefixes = index.routed_via.get((node, ip_vrf, at), []) if at is not None else []
+        if prefixes:
+            named = ", ".join(prefixes[:_SHOWN])
+            more = len(prefixes) - _SHOWN
+            why.append(f"next-hop of {named}" + (f" (+{more} more)" if more > 0 else ""))
+        return {"role": "router" if why else "host", "why": tuple(why)}
+
     for b in index.bindings:
         if b.origin == "evpn" or out_of_band(b.interface) or b.interface.startswith(("system", "lo")):
             continue
@@ -131,6 +157,7 @@ def endpoints(fabric: Fabric) -> Iterator[Endpoint]:
             ip_vrf=ip_vrf,
             mac_vrf=bridge,
             **where,  # type: ignore[arg-type]
+            **role(b.node, ip_vrf, b.address),  # type: ignore[arg-type]
         )
     # Hosts that only bridge: learned locally, bound by no ARP or ND entry here.
     for (node, bridge, address), entry in sorted(index.macs.items()):
