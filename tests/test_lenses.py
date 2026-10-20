@@ -127,23 +127,31 @@ def _with_ce(peer: bool, prefixes: int) -> Fabric:
 
 
 def _roles(fabric: Fabric) -> dict[str, tuple]:
-    return {e.ip or e.mac: (e.role, e.why) for e in LENSES["endpoints"].run(fabric) if e.node == "leaf3"}
+    return {
+        e.ip or e.mac: (e.role, e.bgp, e.routes) for e in LENSES["endpoints"].run(fabric) if e.node == "leaf3"
+    }
 
 
 def test_an_endpoint_the_instance_peers_with_or_routes_over_is_a_router() -> None:
     assert _roles(_with_ce(peer=True, prefixes=1)) == {
-        "10.1.1.20": ("host", ()),
-        "10.1.1.50": ("router", ("bgp peer", "next-hop of 192.168.0.0/24")),
+        "10.1.1.20": ("host", "", ()),
+        "10.1.1.50": ("router", "peer", ("192.168.0.0/24",)),
         # Only bridged: nothing says what it is.
-        DUP: ("", ()),
+        DUP: ("", "", ()),
     }
-    # A static route over it is enough, and a long list is cut short.
-    assert _roles(_with_ce(peer=False, prefixes=5))["10.1.1.50"] == (
-        "router",
-        ("next-hop of 192.168.0.0/24, 192.168.1.0/24, 192.168.2.0/24 (+2 more)",),
-    )
+    # A static route over it is enough.
+    assert _roles(_with_ce(peer=False, prefixes=1))["10.1.1.50"] == ("router", "", ("192.168.0.0/24",))
     # A peer with no routes over it is still a router.
-    assert _roles(_with_ce(peer=True, prefixes=0))["10.1.1.50"] == ("router", ("bgp peer",))
+    assert _roles(_with_ce(peer=True, prefixes=0))["10.1.1.50"] == ("router", "peer", ())
+
+
+def test_the_routes_column_names_the_first_prefixes_and_counts_the_rest() -> None:
+    from fcli.render import cells
+
+    spec = LENSES["endpoints"]
+    (ce,) = [e for e in spec.run(_with_ce(peer=False, prefixes=5)) if e.ip == "10.1.1.50"]
+    assert len(ce.routes) == 5
+    assert cells(spec, ce)["routes"] == "192.168.0.0/24, 192.168.1.0/24, 192.168.2.0/24 (+2 more)"
 
 
 def _hops(source: str, destination: str, ni: str | None = None) -> list[tuple]:

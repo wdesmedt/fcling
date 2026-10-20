@@ -76,7 +76,7 @@ One mac-vrf or ip-vrf on every node that carries it: state, VNI, EVI, route targ
 
 Every host attached to the fabric, on each node it is attached to. A host is an ARP/ND binding on an access port or an irb, placed by its MAC in the bridge table. A host that only bridges is listed by its MAC. The output leaves out management, the links between fabric nodes, and hosts a node only learned over EVPN. A host on a multihomed segment is listed on every node of the segment (`learned remote` where the peer learned it).
 
-`role` tells hosts from routers, per node. A binding is a `router` when its IP-VRF on that node peers with it over BGP, or has an active route whose next-hop is its IP: a static, BGP or IGP route, not a local or host one. `why` says which: `bgp peer`, and `next-hop of` the first three prefixes routed over it, with a count of the rest. Any other binding is a `host`. A host that only bridges has no role, since no IP-VRF knows it.
+`role` tells hosts from routers, per node. A binding is a `router` when its IP-VRF on that node peers with it over BGP, or has an active route whose next-hop is its IP: a static, BGP or IGP route, not a local or host one. `BGP` says `peer` for the first, and `routes` lists the prefixes routed over it: the first three, with a count of the rest (`-o json` has them all). Any other binding is a `host`. A host that only bridges has no role, since no IP-VRF knows it.
 
 ## `topology`
 

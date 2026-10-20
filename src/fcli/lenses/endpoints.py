@@ -20,9 +20,6 @@ from ..lens import lens
 from ..report import Column, Record
 from .common import Index, ip, mac
 
-#: How many of the prefixes a router is the next-hop of are named.
-_SHOWN = 3
-
 
 class Endpoint(Record):
     key: ClassVar[tuple[str, ...]] = ("ip", "mac", "mac_vrf")
@@ -49,8 +46,19 @@ class Endpoint(Record):
     #: ``router``: its IP-VRF peers with it over BGP, or routes over it.
     #: ``host``: neither. Empty for a host that only bridges.
     role: str = ""
-    #: Why it is a router: ``bgp peer``, and the prefixes routed over it.
-    why: tuple[str, ...] = ()
+    #: ``peer``: its IP-VRF peers with it over BGP.
+    bgp: str = ""
+    #: The prefixes its IP-VRF routes over it: those it is the next-hop of.
+    routes: tuple[str, ...] = ()
+
+
+#: How many of the prefixes routed over an endpoint its column names.
+_SHOWN = 3
+
+
+def _routes(e: Endpoint) -> str:
+    more = len(e.routes) - _SHOWN
+    return ", ".join(e.routes[:_SHOWN]) + (f" (+{more} more)" if more > 0 else "")
 
 
 _COLUMNS = (
@@ -65,7 +73,8 @@ _COLUMNS = (
     Column("learned", "learned"),
     Column("ES", lambda e: e.es or e.esi),
     Column("LLDP", lambda e: list(e.lldp)),
-    Column("why", lambda e: list(e.why)),
+    Column("BGP", "bgp"),
+    Column("routes", _routes),
 )
 
 
@@ -116,15 +125,13 @@ def endpoints(fabric: Fabric) -> Iterator[Endpoint]:
         """A router if *ip_vrf* on *node* peers with *address* over BGP or routes over it."""
         at = ip(address)
         service = index.services.get((node, ip_vrf))
-        why: list[str] = []
-        if at is not None and service and any(ip(p) == at for p in service.bgp_peers):
-            why.append("bgp peer")
-        prefixes = index.routed_via.get((node, ip_vrf, at), []) if at is not None else []
-        if prefixes:
-            named = ", ".join(prefixes[:_SHOWN])
-            more = len(prefixes) - _SHOWN
-            why.append(f"next-hop of {named}" + (f" (+{more} more)" if more > 0 else ""))
-        return {"role": "router" if why else "host", "why": tuple(why)}
+        peer = at is not None and service is not None and any(ip(p) == at for p in service.bgp_peers)
+        routes = tuple(index.routed_via.get((node, ip_vrf, at), ())) if at is not None else ()
+        return {
+            "role": "router" if peer or routes else "host",
+            "bgp": "peer" if peer else "",
+            "routes": routes,
+        }
 
     for b in index.bindings:
         if b.origin == "evpn" or out_of_band(b.interface) or b.interface.startswith(("system", "lo")):
