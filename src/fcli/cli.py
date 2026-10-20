@@ -28,10 +28,11 @@ from .checks import CHECKS, finding_event, required, run_checks
 from .collect import collect
 from .gnmi.client import Tls
 from .incidents import correlate
-from .remote import LOCAL, Remote, RemoteError, find_token, keep_token, token_path
+from .remote import LOCAL, Remote, RemoteError, find_kept, find_token, keep_token, token_path
 from .report import Param, Record, Report
 from .reports import REGISTRY, bgp_rib
 from .store import BeforeHistory, Store, default_path, matches, parse_time
+from .tls import cert_path, fingerprint, keep_certificate, loopback
 
 try:
     from ._version import __version__
@@ -53,26 +54,40 @@ class Settings:
     timeout: float
     server: str | None = None
     token: str | None = None
+    server_ca: Path | None = None
 
     def remote(self) -> Remote | None:
         if not self.server:
             return None
-        remote = Remote(self.server, self.token)
+        remote = Remote(self.server, self.token, ca=self.server_ca)
         if remote.token is None and remote.local:
             remote.token = self._kept_token()
+        if remote.tls and remote.ca is None and remote.local:
+            remote.ca = self._kept_cert()
         return remote
+
+    def _history(self) -> Path | None:
+        """This fabric's history, if the inventory tells which fabric it is."""
+        source = self.inventory_file or self.topo or inv.discover()
+        if source is None:
+            return None
+        try:
+            loaded = inv.from_file(source) if self.inventory_file else inv.from_clab(source)
+        except inv.InventoryError:
+            return None
+        return default_path(loaded.name)
 
     def _kept_token(self) -> str | None:
         """The token a server on this machine made up: its fabric's, or the only one kept."""
-        preferred = None
-        source = self.inventory_file or self.topo or inv.discover()
-        if source is not None:
-            try:
-                loaded = inv.from_file(source) if self.inventory_file else inv.from_clab(source)
-                preferred = token_path(default_path(loaded.name))
-            except inv.InventoryError:
-                pass
+        history = self._history()
+        preferred = token_path(history) if history else None
         return find_token(preferred, default_path("").parent.glob("*.token"))
+
+    def _kept_cert(self) -> Path | None:
+        """The certificate a server on this machine made up: its fabric's, or the only one kept."""
+        history = self._history()
+        preferred = cert_path(history) if history else None
+        return find_kept(preferred, default_path("").parent.glob("*.crt"))
 
     def fabric(self) -> inv.Inventory:
         """The selected nodes. Loaded here, not in the group, so ``--help`` needs no inventory."""
@@ -141,6 +156,12 @@ class Settings:
 )
 @click.option("--token", help="the bearer token the server was started with")
 @click.option(
+    "--server-ca",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="PEM certificate to verify an https --server against "
+    "[default: on the server's machine, the one it kept; else the system's]",
+)
+@click.option(
     "-l",
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
@@ -166,6 +187,7 @@ def main(
     timeout: float,
     server: str | None,
     token: str | None,
+    server_ca: Path | None,
     log_level: str,
 ) -> None:
     """Reports on an SR Linux fabric, straight from gNMI."""
@@ -188,6 +210,7 @@ def main(
         timeout=timeout,
         server=server,
         token=token,
+        server_ca=server_ca,
     )
 
 
@@ -199,7 +222,7 @@ def _broken(what: str, exc: ImportError) -> click.ClickException:
     )
 
 
-def _login_url(host: str, port: int, token: str | None) -> str:
+def _login_url(host: str, port: int, token: str | None, tls: bool = False) -> str:
     """The UI's address to open, or pass as ``--server``: with the token in it, if there is one."""
     import socket
 
@@ -207,7 +230,7 @@ def _login_url(host: str, port: int, token: str | None) -> str:
     name = socket.gethostname() if host in ("", "0.0.0.0", "::") else host  # noqa: S104 - compared, not bound
     if ":" in name:
         name = f"[{name}]"
-    return f"http://{name}:{port}/" + (f"?token={token}" if token else "")
+    return f"{'https' if tls else 'http'}://{name}:{port}/" + (f"?token={token}" if token else "")
 
 
 def _collect(
@@ -426,6 +449,18 @@ def bgp_rib_command(
     help="require this bearer token [default: none on localhost, else one kept next to the history]",
 )
 @click.option(
+    "--tls-cert",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="PEM certificate to serve HTTPS with "
+    "[default: beyond loopback, one made up and kept next to the history]",
+)
+@click.option(
+    "--tls-key",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="the PEM private key of --tls-cert",
+)
+@click.option("--no-tls", is_flag=True, help="plain HTTP beyond loopback, e.g. behind a proxy that does TLS")
+@click.option(
     "--persist-acks",
     is_flag=True,
     help="keep acknowledged incidents across restarts, in a file next to the history",
@@ -450,6 +485,9 @@ def serve(
     poll: float,
     names: tuple[str, ...],
     api_token: str | None,
+    tls_cert: Path | None,
+    tls_key: Path | None,
+    no_tls: bool,
     persist_acks: bool,
     daemon: bool,
     log_file: Path | None,
@@ -472,7 +510,19 @@ def serve(
     reports = [REGISTRY[n] for n in names] or [r for r in REGISTRY.values() if not r.hidden]
     if log_file and not daemon:
         raise click.UsageError("--log-file goes with --daemon")
+    if bool(tls_cert) != bool(tls_key):
+        raise click.UsageError("--tls-cert and --tls-key go together")
+    if no_tls and tls_cert:
+        raise click.UsageError("--no-tls and --tls-cert are mutually exclusive")
     path = (db or default_path(fabric.name)).resolve()
+    tls = None
+    kept_cert = False
+    if tls_cert and tls_key:
+        tls = (tls_cert.resolve(), tls_key.resolve())
+    elif not no_tls and not loopback(host):
+        # Beyond loopback the token and the fabric's state cross the network: never in the clear.
+        tls = keep_certificate(path, host)
+        kept_cert = True
     kept = None
     if host not in LOCAL and not api_token:
         # Made up once and kept: a restart lets the same browsers and clients in.
@@ -487,8 +537,9 @@ def serve(
     banner = (
         f"{fabric.name}: {len(fabric.nodes)} nodes, {len(reports)} reports, history in {path}"
         + (f", acknowledgements in {acks.path} ({len(acks.all())} kept)" if acks.path else "")
-        + f"; UI at {_login_url(host, port, api_token)}, API at /api/status, MCP at /mcp"
+        + f"; UI at {_login_url(host, port, api_token, tls is not None)}, API at /api/status, MCP at /mcp"
         + (f"; token kept in {kept}" if kept else "")
+        + (f"; certificate kept in {tls[0]}, SHA-256 {fingerprint(tls[0])}" if tls and kept_cert else "")
     )
     # Soft-wrapped: the login URL stays one string to copy, whatever the width of the terminal.
     err.print(banner, highlight=False, soft_wrap=True)
@@ -511,6 +562,7 @@ def serve(
             host,
             port,
             ready,
+            tls,
         )
     finally:
         store.close()

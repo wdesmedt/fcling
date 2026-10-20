@@ -91,4 +91,4 @@ While live, the UI follows `/api/events` and refreshes about a second and a half
 
 ## With a token
 
-When the server requires a token (beyond localhost, or with `--api-token`), open the URL it prints at start-up, `http://host:8765/?token=...`; a server in the background prints it in its log ([server.md](server.md#security)). It keeps the token for the browser tab and removes it from the address bar. The UI's own files are served without the token because they hold no data. Every API call still needs it.
+When the server requires a token (beyond localhost, or with `--api-token`), open the URL it prints at start-up, `https://host:8765/?token=...`; a server in the background prints it in its log ([server.md](server.md#security)). It keeps the token for the browser tab and removes it from the address bar. The UI's own files are served without the token because they hold no data. Every API call still needs it.

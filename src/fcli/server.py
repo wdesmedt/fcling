@@ -622,8 +622,16 @@ GRACE = 5
 FORCE_AFTER = 3.0
 
 
-def run(app: Starlette, host: str, port: int, ready: Callable[[], None] | None = None) -> None:
+def run(
+    app: Starlette,
+    host: str,
+    port: int,
+    ready: Callable[[], None] | None = None,
+    tls: tuple[Path, Path] | None = None,
+) -> None:
     """Serve *app* until SIGINT, SIGTERM or SIGHUP; a second one of those stops it at once.
+
+    With *tls*, a certificate and its key, it is served over HTTPS.
 
     Uvicorn waits for every connection to close before it stops, and an event
     stream never closes by itself: so a signal first ends the streams.
@@ -674,7 +682,15 @@ def run(app: Starlette, host: str, port: int, ready: Callable[[], None] | None =
                 self.loop.call_soon_threadsafe(app.state.close_streams)
 
     Server(
-        uvicorn.Config(app, host=host, port=port, log_level="warning", timeout_graceful_shutdown=GRACE)
+        uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level="warning",
+            timeout_graceful_shutdown=GRACE,
+            ssl_certfile=tls[0] if tls else None,
+            ssl_keyfile=tls[1] if tls else None,
+        )
     ).run()
 
 

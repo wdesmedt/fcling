@@ -83,13 +83,14 @@ def test_the_login_url_names_a_reachable_host(monkeypatch: pytest.MonkeyPatch) -
     assert _login_url("127.0.0.1", 8765, None) == "http://127.0.0.1:8765/"
     assert _login_url("0.0.0.0", 8765, "s3cret") == "http://labhost:8765/?token=s3cret"  # noqa: S104
     assert _login_url("fd00::1", 80, None) == "http://[fd00::1]:80/"
+    assert _login_url("0.0.0.0", 8765, None, tls=True) == "https://labhost:8765/"  # noqa: S104
 
 
 def test_serve_beyond_localhost_keeps_its_token_across_restarts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     served: list[Any] = []
-    monkeypatch.setattr(server, "run", lambda app, host, port, ready=None: served.append(app))
+    monkeypatch.setattr(server, "run", lambda app, host, port, ready=None, tls=None: served.append(app))
     inventory = tmp_path / "inv.yml"
     inventory.write_text(INVENTORY)
     db = tmp_path / "h.db"

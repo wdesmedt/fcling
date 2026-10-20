@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,9 +24,15 @@ class RemoteError(Exception):
 
 
 class Remote:
-    """A server at *url*; a ``?token=`` in it, as ``fcling serve`` prints it, is the token if none given."""
+    """A server at *url*; a ``?token=`` in it, as ``fcling serve`` prints it, is the token if none given.
 
-    def __init__(self, url: str, token: str | None = None, timeout: float = 120.0) -> None:
+    Over HTTPS its certificate is verified against *ca*, a PEM file, if given,
+    else against the system's trust store.
+    """
+
+    def __init__(
+        self, url: str, token: str | None = None, timeout: float = 120.0, ca: Path | None = None
+    ) -> None:
         parts = urllib.parse.urlsplit(url)
         query = urllib.parse.parse_qsl(parts.query)
         given = [v for k, v in query if k == "token"]
@@ -33,6 +40,11 @@ class Remote:
         self.url = urllib.parse.urlunsplit(parts._replace(query=rest, fragment="")).rstrip("/")
         self.token = token or (given[-1] if given else None)
         self.timeout = timeout
+        self.ca = ca
+
+    @property
+    def tls(self) -> bool:
+        return urllib.parse.urlsplit(self.url).scheme == "https"
 
     @property
     def local(self) -> bool:
@@ -56,7 +68,10 @@ class Remote:
         if self.token:
             request.add_header("Authorization", f"Bearer {self.token}")
         try:
-            return urllib.request.urlopen(request, timeout=timeout or self.timeout)  # noqa: S310 - the user's URL
+            context = ssl.create_default_context(cafile=self.ca) if self.tls else None
+            return urllib.request.urlopen(  # noqa: S310 - the user's URL
+                request, timeout=timeout or self.timeout, context=context
+            )
         except urllib.error.HTTPError as exc:
             try:
                 message = json.loads(exc.read()).get("error") or exc.reason
@@ -131,6 +146,14 @@ def find_token(preferred: Path | None, kept: Iterable[Path]) -> str | None:
         return token
     files = list(kept)
     return read_token(files[0]) if len(files) == 1 else None
+
+
+def find_kept(preferred: Path | None, kept: Iterable[Path]) -> Path | None:
+    """*preferred* if it exists, else the only file of *kept*."""
+    if preferred is not None and preferred.is_file():
+        return preferred
+    files = list(kept)
+    return files[0] if len(files) == 1 else None
 
 
 def _sse(response: Any) -> Iterator[dict[str, Any]]:
