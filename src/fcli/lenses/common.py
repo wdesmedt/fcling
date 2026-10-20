@@ -185,15 +185,23 @@ class Index:
 
     @cached_property
     def routed_via(self) -> dict[tuple[str, str, Any], list[str]]:
-        """``(node, network-instance, next-hop IP)`` -> the active prefixes routed over it."""
+        """``(node, network-instance, next-hop IP)`` -> the active prefixes routed over it.
+
+        A route to the next-hop's own address is left out, such as the host
+        route ARP/ND populates for a neighbour: it routes nothing beyond it.
+        """
         out: dict[tuple[str, str, Any], list[str]] = {}
         for (node, ni, _), routes in self.routes.items():
             for route in routes:
                 if not route.active or route.type in ("local", "host"):
                     continue
+                try:
+                    net = ipaddress.ip_network(route.prefix, strict=False)
+                except ValueError:
+                    continue
                 for hop in route.next_hops:
                     address = ip(hop.address)
-                    if address is not None:
+                    if address is not None and not (net.num_addresses == 1 and address in net):
                         prefixes = out.setdefault((node, ni, address), [])
                         if route.prefix not in prefixes:
                             prefixes.append(route.prefix)

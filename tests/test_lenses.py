@@ -117,6 +117,17 @@ def _with_ce(peer: bool, prefixes: int) -> Fabric:
         )
         for n in range(prefixes)
     ]
+    # The host route ARP populates for it: a route to the CE itself, over nothing.
+    records["ipv4-rib"].append(
+        Route(
+            node="leaf3",
+            ni="ipvrf-1",
+            prefix="10.1.1.50/32",
+            type="arp-nd",
+            active=True,
+            next_hops=(RouteNextHop(address="10.1.1.50"),),
+        )
+    )
     records["services"] = [
         s.model_copy(update={"bgp_peers": ("10.1.1.50",)})
         if peer and (s.node, s.name) == ("leaf3", "ipvrf-1")
