@@ -124,6 +124,19 @@ def test_serve_uses_tls_beyond_loopback(
         assert "UI at http://" in output and not db.with_suffix(".crt").exists()
 
 
+def test_the_fingerprint_is_printed_as_it_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Rich would show ":AB:" as an emoji, which one certificate in so many has.
+    monkeypatch.setattr(server, "run", lambda app, host, port, ready=None, tls=None: None)
+    monkeypatch.setattr("fcli.cli.fingerprint", lambda cert: "59:7B:AB:9E")
+    inventory = tmp_path / "inv.yml"
+    inventory.write_text(INVENTORY)
+    db = tmp_path / "[h].db"
+    result = CliRunner().invoke(main, ["-c", str(inventory), "serve", "--db", str(db), "--host", "0.0.0.0"])  # noqa: S104
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "SHA-256 59:7B:AB:9E" in output and str(db) in output
+
+
 def test_serve_uses_a_certificate_given(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     given: list[Any] = []
     monkeypatch.setattr(server, "run", lambda app, host, port, ready=None, tls=None: given.append(tls))

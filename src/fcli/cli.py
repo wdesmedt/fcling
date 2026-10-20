@@ -550,7 +550,8 @@ def serve(
         + (f"; certificate kept in {tls[0]}, SHA-256 {fingerprint(tls[0])}" if tls and kept_cert else "")
     )
     # Soft-wrapped: the login URL stays one string to copy, whatever the width of the terminal.
-    err.print(banner, highlight=False, soft_wrap=True)
+    # Printed as it is: a fingerprint's ":AB:" is no emoji, and a path's "[...]" no markup.
+    err.print(banner, highlight=False, soft_wrap=True, markup=False, emoji=False)
     ready = None
     if daemon:
         from .daemon import DaemonError, detach
