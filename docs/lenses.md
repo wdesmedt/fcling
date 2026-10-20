@@ -35,7 +35,7 @@ Every place in the fabric that knows an IP or a MAC.
 | `local`, `remote` | a MAC learned on this node's port, or over the overlay from a VTEP or a segment |
 | `multihomed` | learned locally on several nodes, all on one ethernet-segment: as intended |
 | `duplicate` | learned locally on several nodes on no common segment, or one IP bound to different MACs |
-| `route` | a host route to the IP, and what it resolves over |
+| `route` | a host route to the IP, and what it resolves over. Over a next-hop a virtual ethernet-segment of the node tracks (IP aliasing), the segment's name and ESI, and `not attached here` when the node is not one of its candidates for the instance: it then advertises none of the segment's A/D routes. |
 | `not-found` | nowhere |
 
 ## `path SOURCE DESTINATION [--ni NI]`

@@ -5,7 +5,9 @@ learned over the overlay and from whom, and the ARP and ND entries that
 resolve to it. For an IP, the subinterfaces it is configured on, the ARP and ND
 entries for it - each followed into the bridge table behind its irb to the
 port, segment or VTEP the host sits on - and the host routes BGP installed for
-it.
+it. A host route whose next-hop a virtual ethernet-segment of the node tracks
+(IP aliasing) names that segment, and whether the node is one of its
+candidates: only then does it advertise the segment's A/D routes.
 
 A MAC learned locally on several nodes is a duplicate - unless every one of
 those ports is on the same ethernet-segment, where it is a host multihomed
@@ -60,13 +62,19 @@ class Sighting(Record):
     prefix: str = ""
     route_type: str = ""
     next_hops: tuple[str, ...] = ()
+    #: ``route`` over a virtual segment's next-hop: whether the node is one of the
+    #: segment's candidates there, and so advertises its A/D routes.
+    attached: bool | None = None
     also_on: tuple[str, ...] = ()
 
 
 def _where(s: Sighting) -> str:
     """Where the address sits, in one phrase."""
     if s.kind == "route":
-        return f"{s.route_type} route {s.prefix} via {', '.join(s.next_hops) or '?'}"
+        text = f"{s.route_type} route {s.prefix} via {', '.join(s.next_hops) or '?'}"
+        if s.esi:
+            text += f"; ES {s.segment} ({s.esi})" + ("" if s.attached else ", not attached here")
+        return text
     parts = []
     if s.learned_on:
         parts.append(f"in {s.bridge_ni} on {s.learned_on}")
@@ -112,6 +120,25 @@ def _egress_interfaces(index: Index, route: Route) -> list[str]:
                 owner = index.loopback_owner.get(end)
                 found.setdefault(tunnel, {})[f"{end} ({owner})" if owner else end] = None
     return [f"{name} to {', '.join(ends)}" if ends else name for name, ends in found.items()]
+
+
+def _virtual_es(index: Index, node: str, route: Route) -> dict[str, Any]:
+    """The virtual segment of *node* tracking one of *route*'s next-hops, in its
+    instance; and whether the node is one of the segment's candidates there."""
+    hops = {nh.address for nh in route.next_hops}
+    for es in index.fabric.get("es"):
+        if es.node != node or es.type != "virtual" or not hops & {nh.address for nh in es.next_hops}:
+            continue
+        served = [a for a in es.associations if a.ni == route.ni]
+        if es.associations and not served:
+            continue
+        candidates = {c.address for a in served for c in a.candidates}
+        return {
+            "esi": es.esi,
+            "segment": es.name,
+            "attached": bool(candidates & index.loopbacks.get(node, set())),
+        }
+    return {}
 
 
 def _follow(index: Index, node: str, interface: str, address: str) -> dict[str, Any]:
@@ -248,4 +275,5 @@ def _ip(index: Index, target: object) -> Iterator[Sighting]:
                         nh.address + (f" ({', '.join(h.label for h in nh.egress)})" if nh.egress else "")
                         for nh in r.next_hops
                     ),
+                    **_virtual_es(index, node, r),
                 )

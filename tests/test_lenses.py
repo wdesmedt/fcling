@@ -397,3 +397,47 @@ def test_path_hops_are_ordered_by_hop_then_node() -> None:
     order = [(h.hop, h.node, h.lookup) for h in hops]
     assert order == sorted(order)
     assert {(h.hop, h.lookup) for h in hops if h.node == "spine1"} <= {(1, 1)}
+
+
+def test_a_route_over_a_virtual_segment_names_it_and_whether_the_node_attaches() -> None:
+    from fcli.reports.layer2 import DfCandidate, EsAssociation, EsNextHop, EthernetSegment
+    from fcli.reports.routing import RouteNextHop
+
+    records = lens_fabric.records()
+    vesi = "00:01:ff:ff:ff:ff:ff:ff:ff:06"
+    candidates = (DfCandidate(address="10.0.0.1"),)
+    for node in ("leaf1", "leaf2"):
+        records["es"].append(
+            EthernetSegment(
+                node=node,
+                name="vES-1",
+                esi=vesi,
+                type="virtual",
+                next_hops=(EsNextHop(address="10.1.1.50", evis=("2",)),),
+                associations=(EsAssociation(ni="ipvrf-1", candidates=candidates),),
+            )
+        )
+        records["ipv4-rib"].append(
+            Route(
+                node=node,
+                ni="ipvrf-1",
+                prefix="192.168.50.1/32",
+                type="bgp",
+                active=True,
+                next_hops=(RouteNextHop(address="10.1.1.50"),),
+            )
+        )
+    found = {
+        s.node: s
+        for s in LENSES["where"].run(dataclasses.replace(fabric(), records=records), address="192.168.50.1")
+    }
+    assert (found["leaf1"].segment, found["leaf1"].esi, found["leaf1"].attached) == ("vES-1", vesi, True)
+    assert found["leaf2"].attached is False
+    from fcli.render import cells
+
+    where = cells(LENSES["where"], found["leaf1"])["where"]
+    assert where == f"bgp route 192.168.50.1/32 via 10.1.1.50; ES vES-1 ({vesi})"
+    assert cells(LENSES["where"], found["leaf2"])["where"].endswith(", not attached here")
+    # A route over no segment's next-hop names none.
+    (plain,) = [s for s in _run("where", address="10.1.1.20") if s.kind == "route"]
+    assert (plain.esi, plain.attached) == ("", None)
