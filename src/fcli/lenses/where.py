@@ -79,7 +79,8 @@ def _where(s: Sighting) -> str:
     if s.kind == "route":
         text = f"{s.route_type} route {s.prefix} via {', '.join(s.next_hops) or '?'}"
         if s.esi:
-            text += f"; L3-aliasing active, ES {s.segment} ({s.esi})" + ("" if s.attached else ", not attached here")
+            text += f"; L3-aliasing active, ES {s.segment} ({s.esi})"
+            text += "" if s.attached else ", not attached here"
         return text
     parts = []
     if s.learned_on:
