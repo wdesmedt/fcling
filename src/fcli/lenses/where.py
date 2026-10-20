@@ -21,6 +21,7 @@ from typing import Any, ClassVar
 from ..fabric import Fabric
 from ..lens import Arg, LensError, lens
 from ..report import Column, Record
+from ..reports.routing import Route
 from .common import Index, ip, mac
 
 
@@ -38,7 +39,8 @@ class Sighting(Record):
     ni: str = ""
     #: The IP or MAC this row is about.
     address: str = ""
-    #: The subinterface it is configured, bound or learned on.
+    #: The subinterface it is configured, bound or learned on; a ``route``'s
+    #: egress: its subinterface, or its tunnel and VNI.
     interface: str = ""
     #: A binding's MAC; a MAC's bound IP.
     mac: str = ""
@@ -91,6 +93,18 @@ _COLUMNS = (
 )
 
 _REQUIRES = ("mac", "arp", "nd", "es", "services", "subif", "ipv4-rib", "ipv6-rib", "lldp")
+
+
+def _egress_interfaces(route: Route) -> list[str]:
+    """Where a route's next-hops leave: a subinterface, or a tunnel and its VNI; each once."""
+    found: dict[str, None] = {}
+    for nh in route.next_hops:
+        for e in nh.egress:
+            if e.kind == "interface":
+                found[e.value] = None
+            elif e.kind == "tunnel":
+                found[f"{e.tunnel} VNI {e.vni}" if e.vni is not None else e.tunnel] = None
+    return list(found)
 
 
 def _follow(index: Index, node: str, interface: str, address: str) -> dict[str, Any]:
@@ -220,6 +234,7 @@ def _ip(index: Index, target: object) -> Iterator[Sighting]:
                     ni=ni,
                     address=text,
                     ip=text,
+                    interface=", ".join(_egress_interfaces(r)),
                     prefix=r.prefix,
                     route_type=r.type,
                     next_hops=tuple(
