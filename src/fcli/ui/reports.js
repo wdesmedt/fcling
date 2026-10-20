@@ -226,7 +226,7 @@ export function ReportView({ name, query, go, at, catalog, nodeCount = 0 }) {
       });
     const stop = live
       ? follow([name], (type) => {
-          if (type !== "change" || pending.current) return;
+          if ((type !== "change" && type !== "resync") || pending.current) return;
           pending.current = setTimeout(() => {
             pending.current = null;
             if (current) load(false, true);

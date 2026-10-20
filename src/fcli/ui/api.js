@@ -139,6 +139,8 @@ let stream = null;
 /** The last change seen, so a stream opened again replays what it missed. */
 let lastSeq = null;
 let hiddenTimer = null;
+/** Whether this tab had its stream open before: opened again, its views load again. */
+let wasOpen = false;
 
 function deliver(type, event) {
   for (const l of listeners) {
@@ -150,7 +152,13 @@ function deliver(type, event) {
 function openStream() {
   if (stream || !listeners.size || document.hidden) return;
   stream = new EventSource(url("/api/events", { token, ...(lastSeq ? { after: lastSeq } : {}) }));
-  stream.onopen = () => listeners.forEach((l) => l.onConnection("live"));
+  stream.onopen = () => {
+    listeners.forEach((l) => l.onConnection("live"));
+    // Back from the background, or from a server restart: what was asked meanwhile may have
+    // failed ("Failed to fetch") and a quiet fabric sends no change to ask again - so "resync".
+    if (wasOpen) deliver("resync", {});
+    wasOpen = true;
+  };
   stream.onerror = () => {
     const state = stream?.readyState === EventSource.CLOSED ? "closed" : "reconnecting";
     listeners.forEach((l) => l.onConnection(state));

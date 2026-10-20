@@ -196,8 +196,11 @@ export function HistoryView({ query, go, graph, catalog }) {
     setRange(null);
     setShown(PAGE);
     const stop = follow(picked, (type, event) => {
-      if (type !== "change" || event.op === "update" || uneventful.has(event.report) || pending.current) return;
-      if (node && event.node !== node) return;
+      if (pending.current) return;
+      if (type !== "resync") {
+        if (type !== "change" || event.op === "update" || uneventful.has(event.report)) return;
+        if (node && event.node !== node) return;
+      }
       pending.current = setTimeout(() => {
         pending.current = null;
         load();
