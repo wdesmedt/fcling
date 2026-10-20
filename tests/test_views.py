@@ -96,3 +96,31 @@ def test_the_history_is_searched_in_every_value(tmp_path: Path) -> None:
     assert found("leaf1 macvrf-102") == []
     assert [c["ts"] for c in store.history(match="ethernet", nodes=["leaf2"])] == [103.0]
     store.close()
+
+
+def test_a_finding_is_raised_and_cleared_not_added_and_removed(tmp_path: Path) -> None:
+    from fcli.checks import finding_event
+    from fcli.delta import Change, Op
+    from fcli.store import Store
+    from fcli.views import history_with_causes
+
+    key = '["bgp-session-down","10.0.0.1"]'
+    warning = {"check": "bgp-session-down", "severity": "warning", "subject": "10.0.0.1", "detail": "idle"}
+    error = {**warning, "severity": "error"}
+    store = Store(tmp_path / "h.db")
+    store.write(
+        [
+            Change(100.0, "leaf1", "checks", key, Op.ADD, after=warning),
+            Change(110.0, "leaf1", "checks", key, Op.CHANGE, before=warning, after=error),
+            Change(120.0, "leaf1", "checks", key, Op.CHANGE, before=error, after=warning),
+            Change(130.0, "leaf1", "checks", key, Op.REMOVE, before=warning),
+            Change(140.0, "leaf1", "lldp", '["ethernet-1/1"]', Op.ADD, after={"interface": "ethernet-1/1"}),
+        ]
+    )
+    changes = history_with_causes(store)
+    assert [c.get("finding") for c in changes] == ["raised", "escalated", "eased", "cleared", None]
+    # Another report's add is still an add.
+    assert finding_event(changes[-1]) == ""
+    # A finding whose severity did not move, as an older record without one may be.
+    assert finding_event({"report": "checks", "op": "change", "before": {}, "after": {}}) == "updated"
+    store.close()

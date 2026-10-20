@@ -26,7 +26,7 @@ Nothing is kept for the management port `mgmt0`, its subinterfaces or the `mgmt`
 ```bash
 fcling history                          # the last hour
 fcling history --since 2h -r bgp-peers -n leaf1
-fcling history --since 1d -r checks     # findings raised and cleared
+fcling history --since 1d -r checks     # findings raised and cleared: the op column says which
 fcling history --follow                 # and keep printing as it happens (needs --server)
 fcling history --since 1d -q ethernet-1/49   # only the changes that mention it
 ```

@@ -21,8 +21,8 @@ const SETTLE_MS = 3000;
 const SEARCH_WAIT_MS = 300;
 
 const kindOf = (c) =>
-  c.report === "checks"
-    ? c.op === "add" ? "raised" : "cleared"
+  c.finding
+    ? c.finding === "cleared" || c.finding === "eased" ? "cleared" : "raised"
     : c.report === "config-commits" ? "commit" : c.origin === "config" ? "config" : "change";
 const KINDS = ["raised", "cleared", "commit", "config", "change"];
 const KIND_LABEL = {

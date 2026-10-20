@@ -975,7 +975,7 @@ main.page {
 
 ul.changes li {
   display: grid;
-  grid-template-columns: 92px 90px 110px 58px 1fr;
+  grid-template-columns: 92px 90px 110px 72px 1fr;
   gap: 8px;
   padding: 5px 0;
   border-top: 1px solid var(--line);
@@ -1002,6 +1002,36 @@ ul.changes .op.remove {
 
 ul.changes .op.change {
   color: var(--warning);
+}
+
+/* A finding raised, escalated or cleared: coloured by its severity, not by the record's op. */
+ul.changes .op:is(.raised, .escalated, .eased, .updated, .cleared) {
+  justify-self: start;
+  padding: 0 5px;
+  border-radius: 4px;
+  line-height: 16px;
+  color: var(--info);
+  background: var(--info-soft);
+}
+
+ul.changes .op:is(.raised, .escalated).error {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+ul.changes .op:is(.raised, .escalated).warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+ul.changes .op.cleared {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+ul.changes .op:is(.eased, .updated) {
+  color: var(--muted);
+  background: none;
 }
 
 ul.changes .delta {

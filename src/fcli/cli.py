@@ -24,7 +24,7 @@ from rich.console import Console
 
 from . import inventory as inv
 from . import render, views
-from .checks import CHECKS, required, run_checks
+from .checks import CHECKS, finding_event, required, run_checks
 from .collect import collect
 from .gnmi.client import Tls
 from .incidents import correlate
@@ -523,6 +523,9 @@ def _when(ts: float | None) -> str:
 def _summary(change: dict[str, Any]) -> str:
     """What a change changed, in a line: the fields that moved, or what came or went."""
     before, after = change.get("before") or {}, change.get("after") or {}
+    if change["report"] == "checks" and change["op"] != "change":
+        f = after if change["op"] == "add" else before
+        return f"{f.get('check', '')} {f.get('subject', '')}: {f.get('detail', '')}"
     if change["op"] == "change":
         moved = [k for k in after if k != "node" and before.get(k) != after.get(k)]
         return "; ".join(f"{k}: {_short(before.get(k))} -> {_short(after.get(k))}" for k in moved)
@@ -551,7 +554,13 @@ def _print_changes(changes: list[dict[str, Any]], output: str) -> None:
         table.add_column(column)
     for c in changes:
         table.add_row(
-            _when(c["ts"]), c["node"], c["report"], c["op"], c["key"], _summary(c), c.get("cause", "")
+            _when(c["ts"]),
+            c["node"],
+            c["report"],
+            finding_event(c) or c["op"],
+            c["key"],
+            _summary(c),
+            c.get("cause", ""),
         )
     Console().print(table)
 

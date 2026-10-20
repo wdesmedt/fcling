@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from .checks import FLAP_WINDOW, Finding, run_checks
+from .checks import FLAP_WINDOW, Finding, finding_event, run_checks
 from .collect import collect
 from .delta import Change, diff, keyed
 from .fabric import Fabric
@@ -225,6 +225,10 @@ def history_with_causes(store: Store, **query: Any) -> list[dict[str, Any]]:
     changes = store.history(**query, exclude=exclude)
     if not changes:
         return changes
+    # A finding's change reads as raised or cleared, not as a record's add or remove.
+    for c in changes:
+        if event := finding_event(c):
+            c["finding"] = event
     # Commits on every node: one on a neighbour can be the cause.
     commits = store.history(
         since=changes[0]["ts"] - ATTRIBUTION_WINDOW,

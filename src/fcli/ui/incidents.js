@@ -68,6 +68,8 @@ export function Change({ change }) {
   const before = change.before || {};
   const after = change.after || {};
   const commit = change.commit;
+  // raised, cleared, escalated, eased or updated: what the server makes of a finding's change.
+  const finding = change.finding;
   let what;
   let detail = null;
   let more = false;
@@ -77,6 +79,11 @@ export function Change({ change }) {
     what = html`<span>commit <b>${after.id}</b> by ${after.username || "?"}${after.comment ? html` — <i>${after.comment}</i>` : ""}${after.status && after.status !== "complete" ? html` <span class="muted">(${after.status})</span>` : ""}</span>`;
     more = true;
     detail = open && html`<${ConfigDiff} node=${change.node} at=${commit?.at ?? change.ts} />`;
+  } else if (finding) {
+    // A finding reads as which check, on what, and why; a severity that moved says so.
+    const f = change.op === "remove" ? before : after;
+    const moved = change.op === "change" && before.severity !== after.severity;
+    what = html`<span><b>${f.check}</b> <span class="mono">${f.subject}</span>${moved ? html` <span class="delta">${before.severity} → ${after.severity}</span>` : ""}${f.detail ? html` — ${f.detail}` : ""}</span>`;
   } else if (change.op === "change") {
     const fields = Object.keys(after).filter(
       (k) => k !== "node" && JSON.stringify(before[k]) !== JSON.stringify(after[k]),
@@ -93,9 +100,6 @@ export function Change({ change }) {
     more = rest.length > 0 || fields.length > SHOWN_FIELDS || fields.some((k) => text(before[k] ?? "").length > SHORT || text(after[k] ?? "").length > SHORT);
     detail = html`${fields.map((k) => html`<${FieldChange} name=${k} before=${before[k]} after=${after[k]} />`)}
       ${rest.length > 0 && html`<dl class="record">${rest.map((k) => html`<dt>${k}</dt><dd><pre>${full(after[k])}</pre></dd>`)}</dl>`}`;
-  } else if (change.report === "checks") {
-    const f = change.op === "add" ? after : before;
-    what = html`<span>${change.op === "add" ? "raised" : "cleared"}: <b>${f.check}</b> ${f.subject} — ${f.detail}</span>`;
   } else {
     what = html`<span class="mono">${keyText(change.key)}</span>`;
     const record = change.op === "add" ? after : before;
@@ -108,8 +112,10 @@ export function Change({ change }) {
                   onClick=${more ? () => setOpen(!open) : undefined}>
     <span class="when mono">${more && html`<span class="caret">${open ? "▾" : "▸"}</span>`}${clock(change.ts)}</span>
     <span class="who">${change.node}</span>
-    <span class="report">${change.report}</span>
-    <span class=${`op ${change.op}`}>${change.op}</span>
+    <span class="report">${finding ? "finding" : change.report}</span>
+    ${finding
+      ? html`<span class=${`op ${finding} ${(change.op === "remove" ? before : after).severity}`}>${finding}</span>`
+      : html`<span class=${`op ${change.op}`}>${change.op}</span>`}
     <span class="what">${config && html`<span class="tag-config" title=${change.cause ? "likely caused by a configuration commit" : "a configuration commit"}>CONFIG</span>`}${what}</span>
     ${change.cause &&
     html`<span class="cause">← ${change.cause}${commit &&

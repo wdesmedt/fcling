@@ -43,7 +43,7 @@ The management port `mgmt0` and the `mgmt` network-instance are in no report, so
 
 A containerlab node reports its host's memory and CPU, so in a lab `resource_high` on those describes the machine running the lab: it says so, and is `info` rather than a warning or an error. Forwarding tables are the node's own, and keep their severity.
 
-Through a server, every finding has a `since`: when it was raised. Findings are kept in the history like report records, under `checks`, so a finding being raised or cleared is a change you can query.
+Through a server, every finding has a `since`: when it was raised. Findings are kept in the history like report records, under `checks`, so a finding being raised or cleared is a change you can query. Its `add` is read as **raised** and its `remove` as **cleared**. A change to a standing finding is **escalated** or **eased** when its severity moved: only the severity is kept, for the detail is volatile. `/api/history` gives each finding's change that reading as `finding`, `fcling history` shows it in its `op` column, and the web UI's History list shows and colours it ([history.md](history.md#reading-it), [ui.md](ui.md#history)).
 
 ## Incidents
 

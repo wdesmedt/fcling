@@ -76,6 +76,29 @@ def required(names: Iterable[str] | None = None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(r for c in chosen for r in c.requires))
 
 
+def finding_event(change: Mapping[str, Any]) -> str:
+    """What a kept change to a finding means: ``raised``, ``cleared``,
+    ``escalated`` or ``eased`` when its severity moved, ``updated`` otherwise;
+    ``""`` for a change that is not to a finding.
+
+    The store keeps findings as records, so it says add and remove; read as a
+    finding, that is raised and cleared.
+    """
+    if change.get("report") != "checks":
+        return ""
+    op = change.get("op")
+    if op == "add":
+        return "raised"
+    if op == "remove":
+        return "cleared"
+    # Lower is worse; a severity it does not know ranks below info.
+    before, after = (
+        SEVERITY_ORDER.get((change.get(side) or {}).get("severity", ""), len(SEVERITY_ORDER))
+        for side in ("before", "after")
+    )
+    return "escalated" if after < before else "eased" if after > before else "updated"
+
+
 def run_checks(fabric: Fabric, names: Iterable[str] | None = None) -> list[Finding]:
     findings: list[Finding] = []
     for c in CHECKS.values() if names is None else (CHECKS[n] for n in names):
