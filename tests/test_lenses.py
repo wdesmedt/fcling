@@ -41,6 +41,7 @@ def test_a_mac_on_one_segment_is_multihomed_not_duplicate() -> None:
         ("leaf2", "multihomed"),
         ("leaf3", "remote"),
         ("leaf1", "arp"),
+        ("leaf2", "arp"),
     }
     assert found[("leaf1", "multihomed")].also_on == ("leaf2",)
     assert found[("leaf1", "multihomed")].segment == "ES-A"
@@ -76,12 +77,13 @@ def test_endpoints_are_listed_where_they_are_attached() -> None:
     assert found == [
         ("leaf1", "", DUP, "ethernet-1/5.1", "local", ""),
         ("leaf1", "10.1.1.10", HOST_A, "lag1.1", "local", "ES-A"),
-        ("leaf2", "", HOST_A, "lag1.1", "local", "ES-A"),
+        # Its ARP entry synced from leaf1, on the segment leaf2 is on too.
+        ("leaf2", "10.1.1.10", HOST_A, "lag1.1", "remote", "ES-A"),
         ("leaf3", "", DUP, "ethernet-1/1.1", "local", ""),
         ("leaf3", "10.1.1.20", HOST_B, "ethernet-1/1.1", "local", ""),
     ]
-    # Host B is not listed on leaf1, which only learned it from leaf3.
-    (a,) = [e for e in _run("endpoints") if e.ip == "10.1.1.10"]
+    # Host B is not listed on leaf1, which only learned it from leaf3, over a VTEP.
+    (a,) = [e for e in _run("endpoints") if (e.node, e.ip) == ("leaf1", "10.1.1.10")]
     assert (a.ip_vrf, a.mac_vrf, a.lldp) == ("ipvrf-1", "macvrf-1", ("hostA",))
 
 

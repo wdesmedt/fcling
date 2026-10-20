@@ -168,6 +168,15 @@ def records() -> dict[str, list[Any]]:
             mac=HOST_B,
             origin="evpn",
         ),
+        # Host A's ARP hashed to leaf1; leaf2, on its segment too, has it synced.
+        NeighborEntry(
+            node="leaf2",
+            interface="irb0.1",
+            nis=("ipvrf-1", "macvrf-1"),
+            address="10.1.1.10",
+            mac=HOST_A,
+            origin="evpn",
+        ),
     ]
     for node in LEAVES:
         irb = Egress(kind="interface", value="irb0.1")

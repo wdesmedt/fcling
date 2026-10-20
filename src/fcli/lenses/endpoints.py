@@ -7,7 +7,7 @@ prefixes over, is a router; one that only bridges cannot be told. Left out:
 management ports, the links between fabric nodes, and hosts another node
 learned over EVPN - each host is listed where it is attached, which on a
 multihomed segment is every node of the segment, even the ones that learned
-it from their peer.
+it, or its ARP or ND entry, from their peer.
 """
 
 from __future__ import annotations
@@ -134,14 +134,21 @@ def endpoints(fabric: Fabric) -> Iterator[Endpoint]:
         }
 
     for b in index.bindings:
-        if b.origin == "evpn" or out_of_band(b.interface) or b.interface.startswith(("system", "lo")):
+        if out_of_band(b.interface) or b.interface.startswith(("system", "lo")):
             continue
         address = mac(b.mac)
         vrfs = index.ni_of(b.node, b.interface)
         ip_vrf = next((n for n in vrfs if index.services[(b.node, n)].type != "mac-vrf"), "")
         bridge = index.bridge_of(b.node, b.interface)
         where: dict[str, object] | None = {}
-        if bridge:
+        if b.origin == "evpn":
+            # Bound by another node. On a multihomed segment that is whichever
+            # leaf the host's ARP or ND hashed to: it is attached here all the same.
+            where = placed(b.node, bridge, address) if bridge else None
+            if not where:
+                continue
+            where["learned"] = "remote"
+        elif bridge:
             where = placed(b.node, bridge, address)
         elif index.fabric_facing(b.node, parent(b.interface)):
             where = None  # a routed link to another node of the fabric
