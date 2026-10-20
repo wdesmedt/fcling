@@ -40,7 +40,8 @@ class Sighting(Record):
     #: The IP or MAC this row is about.
     address: str = ""
     #: The subinterface it is configured, bound or learned on; a ``route``'s
-    #: egress: its subinterface, or its tunnel and VNI.
+    #: egress: its subinterface, or its tunnel and VNI to the tunnel's endpoints
+    #: and the nodes they are.
     interface: str = ""
     #: A binding's MAC; a MAC's bound IP.
     mac: str = ""
@@ -92,19 +93,25 @@ _COLUMNS = (
     Column("where", _where),
 )
 
-_REQUIRES = ("mac", "arp", "nd", "es", "services", "subif", "ipv4-rib", "ipv6-rib", "lldp")
+# ni: the system addresses that name a route's VTEPs.
+_REQUIRES = ("mac", "arp", "nd", "es", "services", "subif", "ipv4-rib", "ipv6-rib", "lldp", "ni")
 
 
-def _egress_interfaces(route: Route) -> list[str]:
-    """Where a route's next-hops leave: a subinterface, or a tunnel and its VNI; each once."""
-    found: dict[str, None] = {}
+def _egress_interfaces(index: Index, route: Route) -> list[str]:
+    """Where a route's next-hops leave: a subinterface, or a tunnel and its VNI to its
+    endpoints, named by the node whose system address each is -
+    ``vxlan VNI 1 to 192.0.2.11 (leaf1), 192.0.2.12 (leaf2)``; each once."""
+    found: dict[str, dict[str, None]] = {}
     for nh in route.next_hops:
         for e in nh.egress:
             if e.kind == "interface":
-                found[e.value] = None
+                found.setdefault(e.value, {})
             elif e.kind == "tunnel":
-                found[f"{e.tunnel} VNI {e.vni}" if e.vni is not None else e.tunnel] = None
-    return list(found)
+                tunnel = f"{e.tunnel} VNI {e.vni}" if e.vni is not None else e.tunnel
+                end = e.value.removesuffix("/32").removesuffix("/128")
+                owner = index.loopback_owner.get(end)
+                found.setdefault(tunnel, {})[f"{end} ({owner})" if owner else end] = None
+    return [f"{name} to {', '.join(ends)}" if ends else name for name, ends in found.items()]
 
 
 def _follow(index: Index, node: str, interface: str, address: str) -> dict[str, Any]:
@@ -234,7 +241,7 @@ def _ip(index: Index, target: object) -> Iterator[Sighting]:
                     ni=ni,
                     address=text,
                     ip=text,
-                    interface=", ".join(_egress_interfaces(r)),
+                    interface="; ".join(_egress_interfaces(index, r)),
                     prefix=r.prefix,
                     route_type=r.type,
                     next_hops=tuple(

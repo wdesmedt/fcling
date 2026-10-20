@@ -63,8 +63,8 @@ def test_an_ip_is_followed_to_the_port_its_host_is_on() -> None:
     # leaf1 has it from EVPN, behind leaf3's VTEP; and a host route to it.
     assert found[("leaf1", "arp")].vtep == "10.0.0.3"
     assert found[("leaf1", "route")].prefix == "10.1.1.20/32"
-    # The route's egress: the tunnel it leaves over, as the interface.
-    assert found[("leaf1", "route")].interface == "vxlan VNI 200"
+    # The route's egress: the tunnel it leaves over and its VTEP, named by its node.
+    assert found[("leaf1", "route")].interface == "vxlan VNI 200 to 10.0.0.3 (leaf3)"
     configured = [s for s in _run("where", address="10.1.1.1") if s.kind == "configured"]
     assert sorted(s.node for s in configured) == ["leaf1", "leaf2", "leaf3"]
     (none,) = _run("where", address="10.9.9.9")
