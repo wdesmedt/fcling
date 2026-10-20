@@ -187,7 +187,7 @@ a.brand:hover .mark-logo {
   color: var(--text);
 }
 
-.logo-ling {
+.logo-cli {
   background: linear-gradient(120deg, #2563eb, #06b6d4);
   -webkit-background-clip: text;
   background-clip: text;
@@ -292,6 +292,24 @@ button.icon {
   background: none;
   font-size: 16px;
   color: var(--muted);
+}
+
+a.link-icon {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+a.link-icon:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+a.link-icon svg {
+  width: 17px;
+  height: 17px;
 }
 
 .history-steps {
