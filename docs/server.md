@@ -70,7 +70,7 @@ Every endpoint takes `inv=KEY=GLOB` and `node=NAME`, both repeatable, to narrow 
 | `GET /api/lenses/{name}` | a lens's records: its arguments as query parameters (`?address=10.1.3.13`), `?at=` from history ([lenses.md](lenses.md)); `?table=1` as for reports |
 | `GET /api/topology` | the fabric as a graph: nodes with tier and health, links, clients, segments, components (`?at=`) |
 | `GET /api/configs` | the configurations kept, newest first (`node`) |
-| `GET /api/configs/diff` | what a commit did to a node's configuration, side by side (`node`, `commit`, `base`, `context`; `seen`, when the commit was seen, tells it from one of the same id before the node was redeployed) |
+| `GET /api/configs/diff` | what a commit did to a node's configuration, side by side (`node`, `commit`, `base`, `context`; `seen`, when the commit was seen, tells it from one of the same id before the node was redeployed; or `at`, when the commit was made, in ISO 8601 or epoch seconds: the first configuration kept from then on against the last one before) |
 | `GET /api/drift` | how the fabric differs from a baseline or time (`from`, `to`, `report`) |
 | `GET/POST /api/baselines`, `DELETE /api/baselines/{name}` | named points in time |
 | `GET /api/events` | server-sent events (below) |

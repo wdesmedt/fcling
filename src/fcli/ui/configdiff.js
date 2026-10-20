@@ -30,22 +30,26 @@ function Cell({ side, row }) {
       text=${line.text} other=${other} side=${side === "left" ? "gone" : "came"} /></td>`;
 }
 
+/** Seconds between a commit and the configuration kept after it beyond which the history was not reading. */
+const EARLIER = 60;
+
 const label = (kept) => (kept ? `after commit ${kept.commit_id ?? "?"} · ${clock(kept.ts)}` : "");
 
 /** The diff of commit *commit* on *node*, fetched when it is shown. *seen*, when the commit
- *  was seen, tells it from a commit of the same id before the node was redeployed. */
-export function ConfigDiff({ node, commit, seen }) {
+ *  was seen, tells it from a commit of the same id before the node was redeployed. Or *at*,
+ *  when the commit was made: the first configuration kept from then on against the one before. */
+export function ConfigDiff({ node, commit, seen, at }) {
   const [whole, setWhole] = useState(false);
   const [state, setState] = useState({ diff: null, error: "" });
   useEffect(() => {
     let current = true;
-    get("/api/configs/diff", { node, commit: commit ?? "", seen: seen ?? "", context: whole ? WHOLE : 3 })
+    get("/api/configs/diff", { node, commit: commit ?? "", seen: seen ?? "", at: at ?? "", context: whole ? WHOLE : 3 })
       .then((diff) => current && setState({ diff, error: "" }))
       .catch((e) => current && setState({ diff: null, error: e.message }));
     return () => {
       current = false;
     };
-  }, [node, commit, seen, whole]);
+  }, [node, commit, seen, at, whole]);
   const { diff, error } = state;
   if (error) return html`<p class="error-text">${error}</p>`;
   if (!diff) return html`<p class="muted">Reading the configurations…</p>`;
@@ -53,13 +57,19 @@ export function ConfigDiff({ node, commit, seen }) {
     (c) => html`<span class="chip">commit ${c.id} · ${c.username || "?"}${c.comment ? ` · ${c.comment}` : ""}</span>`,
   );
   if (!diff.before) {
+    // Made long before the first read: the history began after it.
+    const older = diff.at && diff.after.ts - diff.at > EARLIER;
     return html`<div class="config-diff"><div class="config-diff-head">${commits}</div>
-      <p class="muted">This is the first configuration of ${node} the history kept: there is nothing earlier to compare it with.</p></div>`;
+      <p class="muted">${older
+        ? `This commit was made before the history kept any configuration of ${node}: the first it kept is from ${clock(diff.after.ts)}, with nothing earlier to compare it with.`
+        : `This is the first configuration of ${node} the history kept: there is nothing earlier to compare it with.`}</p></div>`;
   }
   const changed = diff.added + diff.removed + diff.changed;
   return html`<div class="config-diff">
     <div class="config-diff-head">
       ${commits}
+      ${diff.commits.length > 1 &&
+      html`<span class="muted" title="Every commit seen between the two configurations kept: the history read the configuration once for all of them">${diff.commits.length} commits between the two</span>`}
       <span class="counts">
         <span class="c-added">+${diff.added} added</span>
         <span class="c-removed">−${diff.removed} removed</span>

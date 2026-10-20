@@ -71,11 +71,12 @@ export function Change({ change }) {
   let what;
   let detail = null;
   let more = false;
-  if (change.report === "config-commits" && change.op === "add") {
-    // A commit opens on what it did to the configuration.
+  if (change.report === "config-commits" && change.op !== "remove") {
+    // A commit opens on what it did to the configuration: found by when it was made,
+    // as the Configuration Commits page does, for a commit's id comes again.
     what = html`<span>commit <b>${after.id}</b> by ${after.username || "?"}${after.comment ? html` — <i>${after.comment}</i>` : ""}${after.status && after.status !== "complete" ? html` <span class="muted">(${after.status})</span>` : ""}</span>`;
     more = true;
-    detail = open && html`<${ConfigDiff} node=${change.node} commit=${after.id} seen=${change.ts} />`;
+    detail = open && html`<${ConfigDiff} node=${change.node} at=${commit?.at ?? change.ts} />`;
   } else if (change.op === "change") {
     const fields = Object.keys(after).filter(
       (k) => k !== "node" && JSON.stringify(before[k]) !== JSON.stringify(after[k]),
@@ -116,7 +117,7 @@ export function Change({ change }) {
         e.stopPropagation();
         setDiff(!diff);
       }}>${diff ? "hide its diff" : "show its diff"}</a>`}</span>`}
-    ${diff && commit && html`<div class="change-detail" onClick=${(e) => e.stopPropagation()}><${ConfigDiff} node=${commit.node} commit=${commit.id} seen=${commit.seen} /></div>`}
+    ${diff && commit && html`<div class="change-detail" onClick=${(e) => e.stopPropagation()}><${ConfigDiff} node=${commit.node} at=${commit.at ?? commit.seen} /></div>`}
     ${open && html`<div class="change-detail" onClick=${(e) => e.stopPropagation()}>${detail}</div>`}
   </li>`;
 }

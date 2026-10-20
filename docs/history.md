@@ -61,7 +61,7 @@ This is timing, not proof. Something unrelated within two minutes of a commit, a
 
 ### Configuration-related, or unplanned
 
-Each change has an `origin`. It is `config` for a commit and for anything put down to one, findings raised or cleared included. It is `unplanned` for the rest: what the network did on its own. `commit` names the commit (`{"node", "id"}`) whose diff explains it. The web UI tags configuration-related changes **CONFIG** and filters on it.
+Each change has an `origin`. It is `config` for a commit and for anything put down to one, findings raised or cleared included. It is `unplanned` for the rest: what the network did on its own. `commit` names the commit (`{"node", "id", "seen", "at"}`) whose diff explains it: `seen` is when the engine saw it, `at` when the node says it was made. The web UI tags configuration-related changes **CONFIG** and filters on it.
 
 ## Configurations and their diffs
 
@@ -75,8 +75,13 @@ A commit's diff compares the configuration kept after it with the one kept befor
 fcling config-diff leaf1            # the latest change
 fcling config-diff leaf1 12         # what commit 12 did
 fcling config-diff leaf1 12 --base 9
+fcling config-diff leaf1 --at 2026-10-19T14:20:49.933Z   # the commit made then
 fcling config-diff leaf1 --list     # the configurations kept
 ```
+
+The configurations are paired by time, never by commit id. SR Linux numbers its commits again after a redeploy, so commit 3 can be several commits, and ids can go backwards. With `--at` (`?at=` on `/api/configs/diff`), the commit made at that instant, its `ended` time in the commit log, is compared as the first configuration kept from then on against the last one kept before it. A commit id is first resolved to the configuration kept after it, the latest commit of that id, and then paired the same way. The commits a diff names are those made between its two configurations, by the node's clock.
+
+A gap in the history (the server down, the node unreachable) is one diff. The commits made meanwhile are seen on the reconnect, and the configuration read then holds them all. Asked about any of them, the diff spans the last configuration before the gap to the first one after it, and names each of them. A commit made before the first configuration kept has nothing to compare with. A time after the last configuration kept is an error that says so.
 
 The two configurations are shown side by side. A line only the newer one has is **added**, a line only the older one has is **removed**, and a leaf whose value changed is one **changed** row, with its old and new line next to each other. Three unchanged lines are kept around each change (`-C`), and the rest are folded. Commits made one after another can fall between two reads, and then one diff covers them all and names each one. The first configuration kept for a node has nothing to be compared with.
 

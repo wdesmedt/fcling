@@ -2835,3 +2835,34 @@ a.rib-count:hover {
     text-align: left;
   }
 }
+
+/* ------------------------------------------------- a commit's diff, from its row */
+
+.commit-diff {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 8px 12px 10px;
+  margin-bottom: 10px;
+}
+
+.commit-diff-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+
+.commit-diff-title .link-button {
+  margin: 0 0 0 auto;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+button.row-action {
+  font-size: 12px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}

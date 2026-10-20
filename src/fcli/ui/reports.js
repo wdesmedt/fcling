@@ -1,7 +1,8 @@
 // Any report as a table: live from the engine, from the history at an instant, or collected on the spot.
 
-import { html, useEffect, useRef, useState } from "./vendor/preact-htm.module.js";
-import { follow, get, getReportProgress, withQuery } from "./api.js";
+import { html, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
+import { clock, follow, get, getReportProgress, withQuery } from "./api.js";
+import { ConfigDiff } from "./configdiff.js";
 import { DataTable } from "./table.js";
 
 /** How the navigation groups the reports. */
@@ -115,6 +116,29 @@ function scopeFromQuery(query) {
   return scope;
 }
 
+/**
+ * The commits with a button each for the diff against the configuration before: by when
+ * the commit was made, as its id may have been some other commit's before.
+ */
+function withDiffs(columns, rows) {
+  const [id, started, ended] = ["id", "started", "ended"].map((c) => columns.indexOf(c));
+  return {
+    columns: [...columns, ""],
+    rows: rows.map((row) => {
+      const at = row[ended] || row[started];
+      return [...row, {
+        kind: "action",
+        label: "diff vs previous",
+        node: row[0],
+        id: row[id],
+        at,
+        disabled: !at,
+        title: at ? "What this commit changed: the configuration kept after it against the one kept before" : "The node gives no time for this commit",
+      }];
+    }),
+  };
+}
+
 export function ReportView({ name, query, go, at, catalog, nodeCount = 0 }) {
   const spec = catalog.find((r) => r.name === name);
   const params = Object.fromEntries((spec?.params ?? []).map((p) => [p.name, query[p.name] ?? ""]));
@@ -122,6 +146,7 @@ export function ReportView({ name, query, go, at, catalog, nodeCount = 0 }) {
   const [state, setState] = useState({ answer: null, error: "", loading: false });
   const [draft, setDraft] = useState(params);
   const [progress, setProgress] = useState(null);
+  const [diffOf, setDiffOf] = useState(null);
   const pending = useRef(null);
   const settleMs = useRef(SETTLE_MS);
   const [rowFilter, setRowFilter] = useState(query.q ?? "");
@@ -215,6 +240,16 @@ export function ReportView({ name, query, go, at, catalog, nodeCount = 0 }) {
       pending.current = null;
     };
   }, [key, queryReady]);
+
+  useEffect(() => setDiffOf(null), [name]);
+  const commits = name === "config-commits";
+  const table = useMemo(
+    () =>
+      commits && Array.isArray(state.answer?.columns) && state.answer.columns.length
+        ? withDiffs(state.answer.columns, state.answer.rows ?? [])
+        : { columns: state.answer?.columns, rows: state.answer?.rows },
+    [commits, state.answer],
+  );
 
   if (!spec) return html`<p class="error-text">No report ${name}.</p>`;
   const answer = state.answer;
@@ -358,12 +393,22 @@ export function ReportView({ name, query, go, at, catalog, nodeCount = 0 }) {
     ${!searching && state.loading && !answer && queryReady && html`<p class="muted">Reading ${reportTitle(name)}…</p>`}
     ${answer?.message &&
     html`<p class=${`muted${answer.truncated ? " note" : ""}`}>${answer.message}</p>`}
+    ${diffOf &&
+    html`<section class="commit-diff">
+      <div class="commit-diff-title">
+        <strong>${diffOf.node} · commit ${diffOf.id}</strong>
+        <span class="muted">made ${clock(Date.parse(diffOf.at) / 1000)}, against the configuration kept before it</span>
+        <button class="link-button" onClick=${() => setDiffOf(null)}>Close</button>
+      </div>
+      <${ConfigDiff} key=${`${diffOf.node} ${diffOf.at}`} node=${diffOf.node} at=${diffOf.at} />
+    </section>`}
     ${state.error
       ? html`<p class="error-text">${state.error}</p>`
       : answer?.message && !hasTable
         ? null
         : hasTable
-          ? html`<${DataTable} key=${name} columns=${answer.columns} rows=${answer.rows ?? []} flash=${key}
+          ? html`<${DataTable} key=${name} columns=${table.columns} rows=${table.rows ?? []} flash=${key}
+                               onAction=${commits ? setDiffOf : undefined}
                                filter=${rowFilter} onFilter=${(q) => {
                                  setRowFilter(q);
                                  keep(q, columnFilters);

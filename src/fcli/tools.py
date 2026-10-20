@@ -327,6 +327,11 @@ class _ConfigDiffInput(_Input):
         default=None,
         description="The commit id (from config-commits or a change's cause); omit for the latest.",
     )
+    at: str | None = Field(
+        default=None,
+        description="When the commit was made (its 'ended' time, ISO 8601), in place of commit: "
+        "commit ids repeat, a time does not.",
+    )
     base: int | None = Field(
         default=None, description="Compare with the configuration after this commit, not the one before."
     )
@@ -338,7 +343,7 @@ async def get_config_diff(service: Service, args: _ConfigDiffInput) -> Any:
     """What a configuration commit changed on a node, as SR Linux 'set /' lines: '+' added,
     '-' removed, '~' a leaf whose value changed (old -> new). Secrets are redacted to digests.
     'commits' lists every commit the diff spans."""
-    answer = await service.config_diff(args.node, args.commit, args.base, context=0)
+    answer = await service.config_diff(args.node, args.commit, args.base, context=0, at=args.at)
     lines = []
     for row in answer.pop("rows"):
         left, right = (row.get("left") or {}).get("text"), (row.get("right") or {}).get("text")

@@ -6,6 +6,7 @@ import asyncio
 import copy
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +194,87 @@ def test_a_redeployed_node_numbers_its_commits_again(tmp_path: Path) -> None:
     assert store.config("leaf1", commit_id=25) is None
 
 
+def _iso(ts: float) -> str:
+    """*ts* as SR Linux logs a commit's time."""
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _made(store: Store, seen: float, commit_id: int, made: float, user: str, op: Op = Op.ADD) -> None:
+    """Commit *commit_id*, made at *made* by the node's clock and seen at *seen*."""
+    record = {"node": "leaf1", "id": commit_id, "username": user, "started": _iso(made), "ended": _iso(made)}
+    store.write([Change(seen, "leaf1", "config-commits", f"[{commit_id}]", op, None, record)])
+
+
+@pytest.fixture
+def lives(tmp_path: Path) -> Iterator[Store]:
+    """A node whose commit ids repeat and go backwards, as leaf3 in the lab had them:
+    3 and 4; a redeploy (1 and 2 again); 3 again; then 4 and 5 made while nothing
+    was reading, seen only on the reconnect."""
+    store = Store(tmp_path / "h.db")
+
+    def keep(ts: float, commit_id: int) -> None:
+        tree = copy.deepcopy(_tree(CONFIG))
+        tree["extra"] = {"kept": ts}
+        assert store.keep_config("leaf1", ts, commit_id, tree, config.digest(tree), 9)
+
+    keep(100.0, 2)
+    _made(store, 150.3, 3, 150.0, "first")
+    keep(152.0, 3)
+    _made(store, 200.3, 4, 200.0, "first")
+    keep(202.0, 4)
+    _made(store, 300.0, 1, 290.0, "__internal__", Op.CHANGE)
+    _made(store, 300.0, 2, 295.0, "root", Op.CHANGE)
+    keep(302.0, 2)
+    _made(store, 400.3, 3, 400.0, "second")
+    keep(402.0, 3)
+    _made(store, 600.0, 4, 500.0, "away")
+    _made(store, 600.0, 5, 510.0, "away")
+    keep(602.0, 5)
+    yield store
+    store.close()
+
+
+def _pair(answer: dict[str, Any]) -> tuple[float | None, float]:
+    return ((answer["before"] or {}).get("ts"), answer["after"]["ts"])
+
+
+def _who(answer: dict[str, Any]) -> list[tuple[int, str]]:
+    return [(c["id"], c["username"]) for c in answer["commits"]]
+
+
+def test_the_configuration_after_a_time(lives: Store) -> None:
+    assert lives.config("leaf1", since=152.0)["ts"] == 152.0
+    assert lives.config("leaf1", since=152.5)["ts"] == 202.0
+    assert lives.config("leaf1", since=603.0) is None
+
+
+def test_a_commit_is_paired_with_the_configurations_around_it_by_time(lives: Store) -> None:
+    """Commit 3 twice, ids that go back to 1: the time says which configurations, never the id."""
+    first = views.config_diff(lives, "leaf1", at=150.0)
+    assert _pair(first) == (100.0, 152.0) and _who(first) == [(3, "first")]
+    assert first["changed"] == 1
+    again = views.config_diff(lives, "leaf1", at=400.0)
+    assert _pair(again) == (302.0, 402.0) and _who(again) == [(3, "second")]
+    redeploy = views.config_diff(lives, "leaf1", at=290.0)
+    assert _pair(redeploy) == (202.0, 302.0) and _who(redeploy) == [(1, "__internal__"), (2, "root")]
+    # The commit-id form says the same, once it knows which commit 3.
+    assert _pair(views.config_diff(lives, "leaf1", 3, seen=150.3)) == (100.0, 152.0)
+    assert _pair(views.config_diff(lives, "leaf1", 3)) == (302.0, 402.0)
+
+
+def test_commits_made_while_nothing_was_reading_are_one_diff(lives: Store) -> None:
+    for made in (500.0, 510.0):
+        gap = views.config_diff(lives, "leaf1", at=made)
+        assert _pair(gap) == (402.0, 602.0) and _who(gap) == [(4, "away"), (5, "away")]
+
+
+def test_a_commit_before_the_first_configuration_has_nothing_to_compare(lives: Store) -> None:
+    first = views.config_diff(lives, "leaf1", at=50.0)
+    assert _pair(first) == (None, 100.0) and first["rows"] == [] and first["at"] == 50.0
+    with pytest.raises(LookupError, match="since"):
+        views.config_diff(lives, "leaf1", at=700.0)
+
+
 def test_changes_after_a_commit_are_config_the_rest_unplanned() -> None:
     commit = {
         "ts": 100.0,
@@ -210,9 +292,10 @@ def test_changes_after_a_commit_are_config_the_rest_unplanned() -> None:
     ]
     out = views.attribute(changes, [commit])
     assert [c["origin"] for c in out] == ["config", "config", "config", "unplanned", "unplanned"]
-    assert out[0]["commit"] == {"node": "leaf1", "id": 9, "seen": 100.0} and not out[0]["cause"]
+    assert out[0]["commit"] == {"node": "leaf1", "id": 9, "seen": 100.0, "at": 100.0} and not out[0]["cause"]
     assert (
-        out[1]["commit"] == {"node": "leaf1", "id": 9, "seen": 100.0} and out[1]["cause"] == "commit 9 by a"
+        out[1]["commit"] == {"node": "leaf1", "id": 9, "seen": 100.0, "at": 100.0}
+        and out[1]["cause"] == "commit 9 by a"
     )
     assert out[3]["commit"] is None
 
@@ -225,11 +308,10 @@ COMMITS = "/system/configuration/commit"
 
 
 def _commits(*ids: int) -> dict[str, Any]:
-    return {
-        "srl_nokia-system:system": {
-            "configuration": {"commit": [{"id": i, "status": "complete", "user": "admin"} for i in ids]}
-        }
-    }
+    """The log as a node has it when the engine connects: commits made long before."""
+    made = "2026-01-01T00:00:00.000Z"
+    commits = [{"id": i, "status": "complete", "user": "admin", "started": made, "ended": made} for i in ids]
+    return {"srl_nokia-system:system": {"configuration": {"commit": commits}}}
 
 
 @pytest.fixture
@@ -265,7 +347,11 @@ async def test_the_engine_keeps_the_configuration_after_each_commit(
         changed["srl_nokia-interfaces:interface"][0]["admin-state"] = "disable"
         target.servicer.data[""] = changed
         events.clear()
-        target.push({COMMITS + "[id=3]": {"id": 3, "status": "complete", "user": "ops"}})
+        # Made now, by the node's clock: the engine may read the configuration
+        # before it records the commit.
+        made = _iso(time.time())
+        commit = {"id": 3, "status": "complete", "user": "ops", "started": made, "ended": made}
+        target.push({COMMITS + "[id=3]": commit})
         await _until(lambda: any(e["type"] == "config" for e in events))
         answer = await store.run(views.config_diff, "leaf1", 3)
         assert [r["kind"] for r in answer["rows"] if r["kind"] not in ("same", "skip")] == ["changed"]
@@ -405,7 +491,7 @@ def test_a_commit_is_blamed_for_what_it_did_at_the_far_end() -> None:
     out = views.attribute(changes, [commit], ends)
     assert [c["origin"] for c in out] == ["config"] * 4 + ["unplanned"] * 3
     assert out[0]["cause"] == "commit 7 on spine1 by ops (rr policy)"
-    assert out[0]["commit"] == {"node": "spine1", "id": 7, "seen": 100.0}
+    assert out[0]["commit"] == {"node": "spine1", "id": 7, "seen": 100.0, "at": 100.0}
     # Without the far ends, only a commit on the change's own node counts.
     assert {c["origin"] for c in views.attribute(changes, [commit])} == {"unplanned"}
 
@@ -432,9 +518,11 @@ def test_the_latest_commit_at_either_end_is_the_cause() -> None:
         "node": "leaf1",
         "id": 3,
         "seen": 110.0,
+        "at": 110.0,
     }
     assert views.attribute([change], [own, _spine_commit(120.0)], ends)[0]["commit"] == {
         "node": "spine1",
         "id": 7,
         "seen": 120.0,
+        "at": 120.0,
     }

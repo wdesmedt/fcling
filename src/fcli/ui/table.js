@@ -8,6 +8,7 @@ export function cellPlain(cell) {
   if (cell && typeof cell === "object" && cell.kind === "bgp-rx-act-tx") {
     return `${cell.rx}/${cell.act}/${cell.tx}`;
   }
+  if (cell && typeof cell === "object" && cell.kind === "action") return "";
   return String(cell ?? "");
 }
 
@@ -136,9 +137,16 @@ function useWidths(columns) {
 /**
  * `columns` are titles; `rows` arrays of cell text, the node first. The row filter
  * (`filter`, `onFilter`) and the column filters (`columnFilters` as {title: expression},
- * `onColumnFilters`) may be lifted, to keep them in the URL.
+ * `onColumnFilters`) may be lifted, to keep them in the URL. A cell
+ * `{kind: "action", label}` is a button that hands the cell to `onAction`.
  */
-function renderCell(cell, go) {
+function renderCell(cell, go, onAction) {
+  if (cell?.kind === "action") {
+    return onAction
+      ? html`<button class="row-action" disabled=${cell.disabled} title=${cell.title ?? ""}
+                     onClick=${() => onAction(cell)}>${cell.label}</button>`
+      : "";
+  }
   if (cell?.kind === "bgp-rx-act-tx" && go) {
     const link = (which, n, title) =>
       html`<a class="rib-count" href=${`#/${bgpPeerRibPath(cell, which)}`} title=${title}
@@ -160,6 +168,7 @@ export function DataTable({
   rows,
   onNode,
   go,
+  onAction,
   filter: lifted,
   onFilter,
   columnFilters: liftedColumns,
@@ -304,7 +313,7 @@ export function DataTable({
                   ? html`<td class="node-cell">${!grouped || first
                       ? onNode && cell !== "-" ? html`<a onClick=${() => onNode(cell)}>${cell}</a>` : cell
                       : ""}</td>`
-                  : html`<td>${renderCell(cell, go)}</td>`,
+                  : html`<td>${renderCell(cell, go, onAction)}</td>`,
               )}</tr>`;
             })}</tbody>
           </table>

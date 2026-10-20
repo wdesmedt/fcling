@@ -306,9 +306,10 @@ class Store:
         commit_id: int | None = None,
         before: float | None = None,
         seen: float | None = None,
+        since: float | None = None,
     ) -> dict[str, Any] | None:
         """A kept configuration of *node*, with its tree: the latest; the first kept at or after
-        *commit_id*; or the last kept before *before*.
+        *commit_id*; the last kept before *before*; or the first kept at or after *since*.
 
         A redeployed node numbers its commits from 1 again, so *commit_id* is looked
         up within one run of ids: the latest that reaches it, or - with *seen*, when
@@ -322,6 +323,8 @@ class Store:
             sql, args = "ts = ?", [ts]
         elif before is not None:
             sql, args = "ts < ? ORDER BY ts DESC", [before]
+        elif since is not None:
+            sql, args = "ts >= ? ORDER BY ts", [since]
         else:
             sql = "1 ORDER BY ts DESC"
         row = self.db.execute(

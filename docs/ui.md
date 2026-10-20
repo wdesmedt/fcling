@@ -55,7 +55,7 @@ A changed record leads with its key, the address or MAC that changed, then the f
 
 **Everything / CONFIG / unplanned** separates what was planned from what wasn't. A configuration commit, and every change and finding put down to one (a commit on the node itself, or at the far end of its cable or session: [history.md](history.md#which-commit-caused-a-change)), carries a **CONFIG** tag and a violet edge. The rest is what the network did on its own. The line above the list counts both kinds.
 
-Open a commit to see what it did to the configuration: the configuration before on the left, after on the right, as `set / ...` lines. Added lines are green, removed lines red, and a leaf whose value changed is one amber row with only the part that differs marked. Unchanged lines are folded around each change. Click a fold, or tick **whole configuration**, to see everything. A change put down to a commit names it, and **show its diff** opens the same view under the change. Secrets are shown as digests ([history.md](history.md#configurations-and-their-diffs)).
+Open a commit to see what it did to the configuration: the configuration before on the left, after on the right, as `set / ...` lines. Added lines are green, removed lines red, and a leaf whose value changed is one amber row with only the part that differs marked. Unchanged lines are folded around each change. Click a fold, or tick **whole configuration**, to see everything. A change put down to a commit names it, and **show its diff** opens the same view under the change. Both find the commit by when it was made, as the Configuration Commits page does, so a commit id the node used before is never mistaken for it. Secrets are shown as digests ([history.md](history.md#configurations-and-their-diffs)).
 
 ## Lenses
 
@@ -76,6 +76,8 @@ Any report as a table, with the same columns as the CLI (the server renders them
 | `>10`, `<=5` | the cell's number is more or less (a cell without one never matches) |
 
 Case doesn't matter, and the filters combine. On a report they are kept in the URL (`#/report/bgp-peers?f.state=!up`), so a filtered table can be bookmarked or shared. Lens tables have the same filters. Click a column to sort, and click a node to open it on the topology. A streamed report refreshes about two seconds after the engine says it changed. A report with parameters (`ipv4-rib` by address) has a form, and is then collected on the spot. The pill next to the title says where the rows came from: `live`, `history` or `collected`. Nodes that could not answer are listed above the table. A BGP RIB is never read on opening, since one peer can send tens of thousands of routes: a link (a bgp-peers Rx/Act/Tx count, say) fills in its form, and **Look up** or **List all routes** reads it.
+
+**Configuration Commits** has a **diff vs previous** button on each commit. It opens a panel above the table with what the commit did, in the same side-by-side view as the history's: the first configuration kept from the commit's time on, against the last kept before it. The commit is found by when the node says it was made, not by its id, since SR Linux numbers its commits again (after a redeploy, say), so the same id can be several commits. When the history was not reading, or the configuration was read once for several commits, the panel says how many commits fall between the two configurations and names each. A commit made before the history kept anything of that node has nothing to compare with, and says so ([history.md](history.md#configurations-and-their-diffs)).
 
 ## Ask the agent
 

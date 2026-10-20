@@ -15,7 +15,7 @@ from fcli.acks import AckStore
 from fcli.engine import Engine
 from fcli.gnmi.client import Tls
 from fcli.inventory import Inventory, Node
-from fcli.remote import Remote
+from fcli.remote import Remote, RemoteError
 from fcli.reports import REGISTRY
 from fcli.server import create_app
 from fcli.store import AsyncStore
@@ -477,7 +477,10 @@ def test_configuration_diffs(target: FakeTarget, tmp_path: Path) -> None:
         assert client.get("/api/configs/diff", params={"node": "leaf1", "commit": "9"}).status_code == 400
         assert client.get("/api/configs/diff").status_code == 400
         (commit,) = client.get("/api/history", params={"report": "config-commits"}).json()
-        assert (commit["origin"], commit["commit"]) == ("config", {"node": "leaf1", "id": 8, "seen": 199.0})
+        assert (commit["origin"], commit["commit"]) == (
+            "config",
+            {"node": "leaf1", "id": 8, "seen": 199.0, "at": 199.0},
+        )
     store.close()
 
 
@@ -499,3 +502,45 @@ def test_history_since_a_baseline_through_the_server(served: str, target: FakeTa
         assert [(c["op"], c["after"]["state"]) for c in changes] == [("change", "established")]
     unknown = runner.invoke(main, ["--server", served, "history", "--since-baseline", "nope"])
     assert unknown.exit_code == 2 and "no baseline 'nope'" in unknown.output
+
+
+def test_a_commit_diff_by_when_it_was_made(served: str, tmp_path: Path) -> None:
+    """Commit 3 twice: ``at`` says which, through the API and ``config-diff --at``."""
+    from click.testing import CliRunner
+
+    from fcli import config
+    from fcli.cli import main
+    from fcli.delta import Change, Op
+    from fcli.store import Store
+
+    store = Store(tmp_path / "h.db")
+    for ts, commit_id, state in ((100.0, 4, "enable"), (152.0, 3, "disable"), (252.0, 3, "enable")):
+        tree = {"interface": [{"name": "ethernet-1/1", "admin-state": state}], "kept": ts}
+        store.keep_config("leaf1", ts, commit_id, tree, config.digest(tree), 2)
+    for seen, made, user in (
+        (150.3, "1970-01-01T00:02:30.000Z", "first"),
+        (250.3, "1970-01-01T00:04:10.000Z", "second"),
+    ):
+        record = {"node": "leaf1", "id": 3, "username": user, "started": made, "ended": made}
+        store.write([Change(seen, "leaf1", "config-commits", "[3]", Op.ADD, None, record)])
+    store.close()
+
+    remote = Remote(served)
+    first = remote.get("/api/configs/diff", [("node", "leaf1"), ("at", "1970-01-01T00:02:30.000Z")])
+    assert (first["before"]["ts"], first["after"]["ts"]) == (100.0, 152.0)
+    assert [c["username"] for c in first["commits"]] == ["first"] and first["changed"] == 2
+    second = remote.get("/api/configs/diff", [("node", "leaf1"), ("at", "250")])
+    assert (second["before"]["ts"], second["after"]["ts"]) == (152.0, 252.0)
+    assert [c["username"] for c in second["commits"]] == ["second"]
+    earliest = remote.get("/api/configs/diff", [("node", "leaf1"), ("at", "50")])
+    assert earliest["before"] is None and earliest["rows"] == []
+    for at, error in (("not a time", "is not a time"), ("300", "no configuration of leaf1 kept since")):
+        with pytest.raises(RemoteError, match=error):
+            remote.get("/api/configs/diff", [("node", "leaf1"), ("at", at)])
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["--server", served, "-o", "json", "config-diff", "leaf1", "--at", "250"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["after"]["ts"] == 252.0
+    both = runner.invoke(main, ["--server", served, "config-diff", "leaf1", "3", "--at", "250"])
+    assert both.exit_code == 2 and "not both" in both.output

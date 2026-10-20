@@ -411,7 +411,7 @@ def create_app(
             seen = float(query["seen"]) if query.get("seen") else None
         except ValueError as exc:
             raise _Error(400, f"commit, base, context and seen are numbers: {exc}") from exc
-        return await service.config_diff(node, commit, base, context, seen)
+        return await service.config_diff(node, commit, base, context, seen, query.get("at") or None)
 
     async def events(request: Request) -> Response:
         reports_wanted = set(query_list(request, "report"))

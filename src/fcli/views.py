@@ -120,16 +120,21 @@ CONFIG = "config"
 UNPLANNED = "unplanned"
 
 
+def _made(commit: Mapping[str, Any]) -> float:
+    """When *commit* was made, by the node's clock; when it was seen, if the node does not say."""
+    from .reports.common import parse_time as device_time
+
+    record = commit.get("after") or {}
+    made = device_time(record.get("ended")) or device_time(record.get("started"))
+    return commit["ts"] if made is None else made.timestamp()
+
+
 def _fresh(commit: Mapping[str, Any]) -> bool:
     """Whether the engine saw *commit* being made, rather than found it in the log.
 
     A commit whose time the node does not give is taken as fresh.
     """
-    from .reports.common import parse_time as device_time
-
-    record = commit.get("after") or {}
-    made = device_time(record.get("ended")) or device_time(record.get("started"))
-    return made is None or commit["ts"] - made.timestamp() <= FRESH_COMMIT
+    return commit["ts"] - _made(commit) <= FRESH_COMMIT
 
 
 def attribute(
@@ -137,7 +142,8 @@ def attribute(
 ) -> list[dict[str, Any]]:
     """*changes*, each with the ``cause`` that most likely made it and its ``origin``:
     ``config`` for a commit and what one caused, ``unplanned`` for the rest.
-    ``commit`` names the commit, ``{"node", "id", "seen"}``, for its configuration diff.
+    ``commit`` names the commit, ``{"node", "id", "seen", "at"}``, for its configuration
+    diff: ``at``, when it was made, finds it whatever its id.
 
     A change is put down to the latest commit shortly before it on its own
     node or - with *ends* - on a node at the far end of its cable or session:
@@ -158,7 +164,12 @@ def attribute(
         commit_ref = None
         if change["report"] == "config-commits":
             record = change.get("after") or change.get("before") or {}
-            commit_ref = {"node": change["node"], "id": record.get("id"), "seen": change["ts"]}
+            commit_ref = {
+                "node": change["node"],
+                "id": record.get("id"),
+                "seen": change["ts"],
+                "at": _made(change),
+            }
         elif by_node:
             nodes = {change["node"]}
             if ends is not None and any(n != change["node"] for n in by_node):
@@ -172,7 +183,12 @@ def attribute(
                 cause = f"commit {a.get('id')}{where} by {a.get('username') or '?'}"
                 if a.get("comment"):
                     cause += f" ({a['comment']})"
-                commit_ref = {"node": commit["node"], "id": a.get("id"), "seen": commit["ts"]}
+                commit_ref = {
+                    "node": commit["node"],
+                    "id": a.get("id"),
+                    "seen": commit["ts"],
+                    "at": _made(commit),
+                }
         origin = CONFIG if commit_ref else UNPLANNED
         out.append({**change, "cause": cause, "origin": origin, "commit": commit_ref})
     return out
@@ -236,53 +252,61 @@ def config_diff(
     base: int | None = None,
     context: int = 3,
     seen: float | None = None,
+    at: float | None = None,
 ) -> dict[str, Any]:
     """What a commit did to *node*'s configuration, as a side-by-side diff.
 
-    The configuration after *commit* (the latest without one) is the first
-    kept from that commit on, and it is compared with the one kept before
-    it - or with the one kept after commit *base*. Several commits made
-    between two reads are one diff; ``commits`` lists them. With nothing kept
-    earlier, ``before`` is ``None`` and there are no rows.
-
-    A redeployed node numbers its commits from 1 again: *seen*, when the commit
-    was seen, says which commit *commit* is; without it, the latest by that id.
+    The configurations are paired by time, never by commit id: SR Linux reuses
+    its ids, and a redeployed node numbers its commits from 1 again. The
+    configuration after a commit made at *at* is the first kept from then on;
+    it is compared with the last kept before it, or with the one kept after
+    commit *base*. Without *at*, *commit* is first resolved to the
+    configuration kept after it - *seen*, when the commit was seen, says which
+    commit of that id; without it, the latest - and without either, the latest
+    configuration. ``commits`` are those seen between the two configurations:
+    several commits made between two reads, or while the history was not
+    recording, are one diff. With nothing kept earlier, ``before`` is ``None``
+    and there are no rows.
     """
     from . import config
 
-    after = store.config(node, commit_id=commit, seen=seen) if commit is not None else store.config(node)
+    if at is not None:
+        after = store.config(node, since=at)
+        wanted = f" since {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(at))}"
+    elif commit is not None:
+        after = store.config(node, commit_id=commit, seen=seen)
+        wanted = f" from commit {commit} on"
+    else:
+        after, wanted = store.config(node), ""
     if after is None:
-        raise LookupError(
-            f"no configuration of {node} kept" + (f" from commit {commit} on" if commit is not None else "")
-        )
+        raise LookupError(f"no configuration of {node} kept{wanted}")
     before = (
         store.config(node, commit_id=base) if base is not None else store.config(node, before=after["ts"])
     )
     if before is not None and before["ts"] >= after["ts"]:
         before, after = after, before
-    high = after.get("commit_id") or 0
-    low = (before or {}).get("commit_id") or 0
-    if low > high:
-        low = 0  # before the ids started over
-    # Between the two in time too: ids come again after a redeploy.
     since = before["ts"] if before is not None else None
+    # A commit can be seen after the configuration it is in was read: right
+    # after a (re)connect, say. Up to the next configuration, then, by when it was made.
     until = min((c["ts"] for c in store.configs([node]) if c["ts"] > after["ts"]), default=None)
-    commits: dict[int, dict[str, Any]] = {}
-    for change in store.history(nodes=[node], reports=["config-commits"], limit=100_000):
+    changes = store.history(since=since, until=until, nodes=[node], reports=["config-commits"], limit=100_000)
+    # One commit, however often its record changed; ids alone repeat.
+    commits: dict[tuple[Any, Any], dict[str, Any]] = {}
+    for change in changes:
         record = change.get("after") or {}
         if (
             change["op"] != "remove"
             and isinstance(record.get("id"), int)
-            and low < record["id"] <= high
-            and (since is None or change["ts"] > since)
-            and (until is None or change["ts"] < until)
+            and (since is None or _made(change) > since)
+            and _made(change) <= after["ts"]
         ):
-            commits[record["id"]] = record
+            commits[(record["id"], record.get("started"))] = record
     answer: dict[str, Any] = {
         "node": node,
+        "at": at,
         "before": _config_meta(before),
         "after": _config_meta(after),
-        "commits": [commits[i] for i in sorted(commits)],
+        "commits": list(commits.values()),
     }
     if before is None:
         return {**answer, "rows": [], "summary": "the first configuration kept"}

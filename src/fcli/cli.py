@@ -890,20 +890,39 @@ _DIFF_STYLE = {"added": "green", "removed": "red", "changed": "yellow"}
 @click.option(
     "--base", type=int, help="compare with the configuration after this commit [default: the one before]"
 )
+@click.option(
+    "--at", "at", metavar="TIME", help="the commit made at TIME (ISO 8601, 14:02, 1h), in place of COMMIT"
+)
 @click.option("-C", "--context", default=3, show_default=True, help="unchanged lines around each change")
 @click.option("--list", "listing", is_flag=True, help="list the configurations kept for NODE instead")
 @click.pass_obj
 def config_diff(
-    settings: Settings, node: str, commit: int | None, base: int | None, context: int, listing: bool
+    settings: Settings,
+    node: str,
+    commit: int | None,
+    base: int | None,
+    at: str | None,
+    context: int,
+    listing: bool,
 ) -> None:
     """What a commit changed in a node's configuration, side by side
 
     The server keeps each node's configuration after every commit it sees,
-    secrets redacted. Without COMMIT, the latest change.
+    secrets redacted. Without COMMIT, the latest change. Commit ids repeat:
+    --at, when the commit was made, compares the first configuration kept
+    from then on with the last kept before.
     """
+    if at is not None and commit is not None:
+        raise click.UsageError("give COMMIT or --at, not both")
     query = [("node", node), ("context", str(context))]
     query += [("commit", str(commit))] if commit is not None else []
     query += [("base", str(base))] if base is not None else []
+    try:
+        when = parse_time(at) if at is not None else None
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--at") from exc
+    # As an instant here: a time of day is this side's, not the server's.
+    query += [("at", str(when))] if when is not None else []
     if settings.remote() is not None:
         answer = _remote_get(settings, "/api/configs" if listing else "/api/configs/diff", query)
     else:
@@ -912,7 +931,7 @@ def config_diff(
             answer = (
                 views.configs(store, [node])
                 if listing
-                else views.config_diff(store, node, commit, base, context)
+                else views.config_diff(store, node, commit, base, context, at=when)
             )
         except LookupError as exc:
             raise click.ClickException(str(exc)) from exc
