@@ -58,6 +58,18 @@ def keep_certificate(history: Path, host: str) -> tuple[Path, Path]:
     return cert, key
 
 
+def cert_names(cert: Path) -> list[str]:
+    """The names *cert* is for: its DNS names in order, then its addresses; none if it cannot be read."""
+    from cryptography import x509
+
+    try:
+        loaded = x509.load_pem_x509_certificate(cert.read_bytes())
+        san = loaded.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except (OSError, ValueError, x509.ExtensionNotFound):
+        return []
+    return [*san.get_values_for_type(x509.DNSName), *map(str, san.get_values_for_type(x509.IPAddress))]
+
+
 def fingerprint(cert: Path) -> str:
     """The SHA-256 fingerprint of the PEM certificate in *cert*, as browsers show it."""
     from cryptography import x509

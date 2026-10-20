@@ -620,6 +620,36 @@ def create_app(
 GRACE = 5
 #: After a second signal: how long before the process exits, whatever is still open.
 FORCE_AFTER = 3.0
+#: Seconds between looks at the certificate's files, for one renewed while serving.
+CERT_CHECK = 60.0
+
+
+async def reload_certificate(context: Any, cert: Path, key: Path, every: float = CERT_CHECK) -> None:
+    """Load *cert* and *key* into *context* again whenever either file changes.
+
+    A renewed certificate - certbot's, say - is then presented to new
+    connections without a restart; open ones keep theirs.
+    """
+
+    def stamp() -> tuple[float, float] | None:
+        try:
+            return cert.stat().st_mtime, key.stat().st_mtime
+        except OSError:
+            return None
+
+    seen = stamp()
+    while True:
+        await asyncio.sleep(every)
+        now = stamp()
+        if now is None or now == seen:
+            continue
+        try:
+            context.load_cert_chain(cert, key)
+        except (OSError, ValueError) as exc:  # half written, say: tried again next time
+            logger.warning("certificate %s changed and could not be loaded: %s", cert, exc)
+            continue
+        seen = now
+        logger.warning("certificate %s changed: loaded again", cert)
 
 
 def run(
@@ -631,7 +661,8 @@ def run(
 ) -> None:
     """Serve *app* until SIGINT, SIGTERM or SIGHUP; a second one of those stops it at once.
 
-    With *tls*, a certificate and its key, it is served over HTTPS.
+    With *tls*, a certificate and its key, it is served over HTTPS, and
+    loaded again when the files change.
 
     Uvicorn waits for every connection to close before it stops, and an event
     stream never closes by itself: so a signal first ends the streams.
@@ -643,6 +674,7 @@ def run(
 
     class Server(uvicorn.Server):
         loop: asyncio.AbstractEventLoop | None = None
+        reloading: asyncio.Task[None] | None = None
 
         @contextlib.contextmanager
         def capture_signals(self) -> Any:
@@ -664,6 +696,8 @@ def run(
 
         async def startup(self, sockets: Any = None) -> None:
             await super().startup(sockets)
+            if self.started and tls is not None and self.config.ssl is not None:
+                self.reloading = asyncio.create_task(reload_certificate(self.config.ssl, *tls))
             if self.started and ready is not None:
                 ready()
 

@@ -26,8 +26,8 @@ class RemoteError(Exception):
 class Remote:
     """A server at *url*; a ``?token=`` in it, as ``fcling serve`` prints it, is the token if none given.
 
-    Over HTTPS its certificate is verified against *ca*, a PEM file, if given,
-    else against the system's trust store.
+    Over HTTPS its certificate is verified against the system's trust store,
+    and against *ca*, a PEM file, if given.
     """
 
     def __init__(
@@ -68,7 +68,11 @@ class Remote:
         if self.token:
             request.add_header("Authorization", f"Bearer {self.token}")
         try:
-            context = ssl.create_default_context(cafile=self.ca) if self.tls else None
+            context = None
+            if self.tls:
+                context = ssl.create_default_context()
+                if self.ca is not None:
+                    context.load_verify_locations(cafile=self.ca)
             return urllib.request.urlopen(  # noqa: S310 - the user's URL
                 request, timeout=timeout or self.timeout, context=context
             )

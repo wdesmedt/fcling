@@ -108,7 +108,7 @@ The server listens on localhost by default. When `--host` is anything else, ever
 
 Beyond loopback (anything but `localhost`, `127.0.0.0/8` and `::1`), the server also speaks HTTPS, so the token and the fabric's state never cross the network in the clear. Give it a certificate with `--tls-cert` and `--tls-key`. Without them it makes up a self-signed one the first time and keeps it in `<db>.crt`, with its key in `<db>.key` (readable by its owner only). It names the machine, localhost and the address listened on. Later starts reuse it, so a browser's exception keeps holding. It is made again when it is about to expire, or when `--host` is an address it does not name. The banner prints its SHA-256 fingerprint, to compare with what the browser shows the first time. `--no-tls` serves plain HTTP anyway, for a reverse proxy that does the TLS.
 
-The CLI verifies the certificate. On the server's own machine, given an `https` `--server`, it trusts the certificate the server kept: `<fabric>.crt` in the state directory, or the only `*.crt` there. Elsewhere, copy `<db>.crt` over and pass it with `--server-ca` (`FCLI_SERVER_CA`). A certificate from a CA the system already trusts needs neither.
+The CLI verifies the certificate against the system's trust store. On the server's own machine, given an `https` `--server`, it also trusts the certificate the server kept: `<fabric>.crt` in the state directory, or the only `*.crt` there. Elsewhere, copy `<db>.crt` over and pass it with `--server-ca` (`FCLI_SERVER_CA`). A certificate from a CA the system already trusts needs neither.
 
 Without `--api-token`, the server makes one up the first time and keeps it in `<db>.token`, next to the history, readable by its owner only. Later starts reuse it, so a restart doesn't log out browsers or break clients. Delete the file to get a new one. A token passed with `--api-token` is used as given and never written to disk.
 
@@ -119,5 +119,43 @@ lab: 6 nodes, 30 reports, history in /home/me/.local/state/fcli/lab.db; UI at ht
 ```
 
 With `--daemon`, the same line is in the log. The CLI accepts that URL as it is: `--server 'https://labhost:8765/?token=Xq…'` (or `FCLI_SERVER`) takes the token from it, so `--token` / `FCLI_TOKEN` isn't needed. When the CLI runs on the server's own machine, it doesn't need the token at all: given a local `--server` and no token, it reads `<fabric>.token` from the state directory, or the only `*.token` file there if it can't tell the fabric. A server with `--db` elsewhere is not found this way. The MCP endpoint additionally refuses requests whose `Host` or `Origin` isn't localhost when the server is local, which blocks DNS rebinding from a browser.
+
+A certificate given with `--tls-cert` is checked for changes every minute and loaded again when its files change. A renewed certificate then reaches new connections without a restart. The banner's URL uses a name the certificate is for, so it verifies as printed.
+
+### A certificate from Let's Encrypt
+
+Let's Encrypt only issues certificates for a public DNS name you control, such as `fcli.example.net`, and never for an IP address or a bare hostname. The name may resolve to a private address. A lab server that the internet cannot reach proves the name with the **DNS-01** challenge, a TXT record in the zone. Use certbot's plugin for your DNS provider, or `--manual` to add the record by hand (a manual certificate does not renew by itself). A server reachable from the internet on port 80 can use `--standalone` instead.
+
+```bash
+# DNS-01 through the provider's API (here Cloudflare; credentials in a 0600 file)
+sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials ~/.secrets/cloudflare.ini -d fcli.example.net
+# or HTTP-01, with port 80 open to the internet
+sudo certbot certonly --standalone -d fcli.example.net
+```
+
+certbot writes into `/etc/letsencrypt/live/fcli.example.net/`, readable by root only. Give the user that runs `fcling serve` a copy with a deploy hook. certbot runs it after every issue and renewal, and the server picks the copy up within a minute:
+
+```bash
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/fcling.sh >/dev/null <<'HOOK'
+#!/bin/sh
+set -e
+user=me                                    # who runs fcling serve
+dir=/home/$user/.local/state/fcli/tls
+install -d -o "$user" -m 700 "$dir"
+install -o "$user" -m 644 "$RENEWED_LINEAGE/fullchain.pem" "$dir/fullchain.pem"
+install -o "$user" -m 600 "$RENEWED_LINEAGE/privkey.pem" "$dir/privkey.pem"
+HOOK
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/fcling.sh
+sudo RENEWED_LINEAGE=/etc/letsencrypt/live/fcli.example.net /etc/letsencrypt/renewal-hooks/deploy/fcling.sh
+```
+
+Then serve with the full chain, not `cert.pem` alone, so clients get the intermediate too:
+
+```bash
+fcling -t lab.clab.yml serve --host 0.0.0.0 \
+    --tls-cert ~/.local/state/fcli/tls/fullchain.pem --tls-key ~/.local/state/fcli/tls/privkey.pem
+```
+
+Browsers, `curl`, MCP clients and `fcling --server https://fcli.example.net:8765` all trust it as it is, with no `--server-ca`. `sudo certbot renew --dry-run` tests the renewal and the hook.
 
 Everything the server does over gNMI is read-only.

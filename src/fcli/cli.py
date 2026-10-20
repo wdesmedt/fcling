@@ -32,7 +32,7 @@ from .remote import LOCAL, Remote, RemoteError, find_kept, find_token, keep_toke
 from .report import Param, Record, Report
 from .reports import REGISTRY, bgp_rib
 from .store import BeforeHistory, Store, default_path, matches, parse_time
-from .tls import cert_path, fingerprint, keep_certificate, loopback
+from .tls import cert_names, cert_path, fingerprint, keep_certificate, loopback
 
 try:
     from ._version import __version__
@@ -222,12 +222,17 @@ def _broken(what: str, exc: ImportError) -> click.ClickException:
     )
 
 
-def _login_url(host: str, port: int, token: str | None, tls: bool = False) -> str:
-    """The UI's address to open, or pass as ``--server``: with the token in it, if there is one."""
+def _login_url(host: str, port: int, token: str | None, tls: bool = False, names: Sequence[str] = ()) -> str:
+    """The UI's address to open, or pass as ``--server``: with the token in it, if there is one.
+
+    *names* are those a certificate given is for: the address is one of them, for it to verify.
+    """
     import socket
 
     # Listening on every address: this machine's name is one that others reach it by.
     name = socket.gethostname() if host in ("", "0.0.0.0", "::") else host  # noqa: S104 - compared, not bound
+    if names and name not in names:
+        name = next((n for n in names if not n.startswith("*.")), name)
     if ":" in name:
         name = f"[{name}]"
     return f"{'https' if tls else 'http'}://{name}:{port}/" + (f"?token={token}" if token else "")
@@ -517,8 +522,10 @@ def serve(
     path = (db or default_path(fabric.name)).resolve()
     tls = None
     kept_cert = False
+    given: list[str] = []
     if tls_cert and tls_key:
         tls = (tls_cert.resolve(), tls_key.resolve())
+        given = cert_names(tls[0])
     elif not no_tls and not loopback(host):
         # Beyond loopback the token and the fabric's state cross the network: never in the clear.
         tls = keep_certificate(path, host)
@@ -534,10 +541,11 @@ def serve(
         if (pid := running(path.with_suffix(".pid"))) is not None:
             raise click.ClickException(f"already running as pid {pid}, for history {path}")
     acks = AckStore(acks_path(path) if persist_acks else None)
+    login = _login_url(host, port, api_token, tls is not None, given)
     banner = (
         f"{fabric.name}: {len(fabric.nodes)} nodes, {len(reports)} reports, history in {path}"
         + (f", acknowledgements in {acks.path} ({len(acks.all())} kept)" if acks.path else "")
-        + f"; UI at {_login_url(host, port, api_token, tls is not None)}, API at /api/status, MCP at /mcp"
+        + f"; UI at {login}, API at /api/status, MCP at /mcp"
         + (f"; token kept in {kept}" if kept else "")
         + (f"; certificate kept in {tls[0]}, SHA-256 {fingerprint(tls[0])}" if tls and kept_cert else "")
     )

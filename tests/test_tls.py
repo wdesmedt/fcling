@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import stat
 import threading
@@ -16,9 +17,9 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from fcli import server
-from fcli.cli import Settings, main
+from fcli.cli import Settings, _login_url, main
 from fcli.remote import Remote, RemoteError
-from fcli.tls import cert_path, fingerprint, keep_certificate, key_path, loopback
+from fcli.tls import cert_names, cert_path, fingerprint, keep_certificate, key_path, loopback
 
 INVENTORY = "name: lab\nnodes: {leaf1: {address: 127.0.0.1}}\n"
 
@@ -136,3 +137,55 @@ def test_serve_uses_a_certificate_given(tmp_path: Path, monkeypatch: pytest.Monk
     assert not (tmp_path / "h.crt").exists()
     result = CliRunner().invoke(main, [*base, "--tls-cert", str(cert)])
     assert result.exit_code != 0 and "go together" in result.output
+
+
+def test_the_login_url_names_what_a_given_certificate_is_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "labhost")
+    names = ["*.example.net", "fcli.example.net"]
+    assert _login_url("0.0.0.0", 8765, None, True, names) == "https://fcli.example.net:8765/"  # noqa: S104
+    assert _login_url("0.0.0.0", 8765, None, True, ["labhost"]) == "https://labhost:8765/"  # noqa: S104
+    assert cert_names(Path("/nonexistent.pem")) == []
+
+
+def test_a_renewed_certificate_is_served_without_a_restart(tmp_path: Path) -> None:
+    import asyncio
+    import ssl
+
+    first, key = keep_certificate(tmp_path / "a.db", "127.0.0.1")
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(first, key)
+    cert, served_key = tmp_path / "live.pem", tmp_path / "live.key"
+    cert.write_bytes(first.read_bytes())
+    served_key.write_bytes(key.read_bytes())
+
+    def presented() -> bytes:
+        with socket.create_server(("127.0.0.1", 0)) as listener:
+            port = listener.getsockname()[1]
+
+            def accept() -> None:
+                conn, _ = listener.accept()
+                with contextlib.suppress(ssl.SSLError, OSError), context.wrap_socket(conn, server_side=True):
+                    pass
+
+            thread = threading.Thread(target=accept)
+            thread.start()
+            client = ssl.create_default_context()
+            client.check_hostname, client.verify_mode = False, ssl.CERT_NONE
+            with socket.create_connection(("127.0.0.1", port)) as raw, client.wrap_socket(raw) as tls:
+                der = tls.getpeercert(binary_form=True)
+            thread.join(5)
+            assert der is not None
+            return der
+
+    async def renew() -> None:
+        task = asyncio.create_task(server.reload_certificate(context, cert, served_key, every=0.05))
+        renewed, renewed_key = keep_certificate(tmp_path / "b.db", "127.0.0.1")
+        await asyncio.sleep(0.1)  # the old files seen first, and a later modification time
+        cert.write_bytes(renewed.read_bytes())
+        served_key.write_bytes(renewed_key.read_bytes())
+        await asyncio.sleep(0.3)
+        task.cancel()
+
+    before = presented()
+    asyncio.run(renew())
+    assert presented() != before
