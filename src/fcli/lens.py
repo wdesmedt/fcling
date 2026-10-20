@@ -10,11 +10,16 @@ declares the reports it reads, so it answers the same from the nodes, from the
 engine, or from the history at an instant. Like a report, it answers in typed
 records with columns, so every surface - the CLI, the API, the tools - renders
 it without knowing which lens it is.
+
+A lens may also *query*: read a report from the nodes when it is asked, keyed
+by what its declared reports and its arguments say - the prefix a route-table
+matches an address with, in a BGP RIB no engine streams whole. The history has
+no such reads: at an instant, a lens answers without them.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,11 +56,23 @@ class Lens:
     detail_columns: tuple[Column, ...] = ()
     #: Rows in the order the lens gave them - a path's hops - not sorted by node.
     ordered: bool = False
+    #: The fabric of its declared reports and its arguments -> the reports to read
+    #: from the nodes when asked, each with its params; a report may come more than once.
+    queries: Callable[..., Iterable[tuple[str, Mapping[str, Any]]]] | None = None
 
     def table(self, detail: bool = False) -> tuple[Column, ...]:
         return self.columns
 
+    def queried(self, fabric: Fabric, **args: Any) -> list[tuple[str, dict[str, Any]]]:
+        """The reports to read from the nodes for these arguments over *fabric*, with their params."""
+        if self.queries is None:
+            return []
+        return [(r, dict(p)) for r, p in self.queries(fabric, **self._values(args))]
+
     def run(self, fabric: Fabric, **args: Any) -> list[Record]:
+        return list(self.build(fabric, **self._values(args)))
+
+    def _values(self, args: Mapping[str, Any]) -> dict[str, Any]:
         values = {a.name: a.default for a in self.args}
         unknown = set(args) - set(values)
         if unknown:
@@ -66,7 +83,7 @@ class Lens:
                 raise LensError(f"{self.name} needs {a.name}: {a.help}")
             if a.choices and values.get(a.name) not in (None, *a.choices):
                 raise LensError(f"{a.name}: {values[a.name]!r} is not one of {', '.join(a.choices)}")
-        return list(self.build(fabric, **values))
+        return values
 
 
 LENSES: dict[str, Lens] = {}
@@ -81,6 +98,7 @@ def lens(
     args: Sequence[Arg] = (),
     columns: Sequence[Column] | None = None,
     ordered: bool = False,
+    queries: Callable[..., Iterable[tuple[str, Mapping[str, Any]]]] | None = None,
 ) -> Callable[[Callable[..., Iterable[Record]]], Callable[..., Iterable[Record]]]:
     def register(build: Callable[..., Iterable[Record]]) -> Callable[..., Iterable[Record]]:
         LENSES[name] = Lens(
@@ -92,6 +110,7 @@ def lens(
             columns=tuple(columns) if columns is not None else default_columns(record),
             build=build,
             ordered=ordered,
+            queries=queries,
         )
         return build
 

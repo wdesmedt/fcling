@@ -6,6 +6,8 @@ Every surface asks the same questions; this is where they are answered once.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
@@ -36,6 +38,27 @@ async def fabric_now(nodes: Sequence[Node], reports: Iterable[str], rpc_timeout:
             records[name].extend(rows)
     unreachable = {r.node.name: r.error for r in results if r.error and not r.records}
     return Fabric.of(nodes, records, unreachable)
+
+
+async def queried_now(
+    nodes: Sequence[Node], queries: Sequence[tuple[str, Mapping[str, Any]]], rpc_timeout: float = 30.0
+) -> dict[str, list[Record]]:
+    """What a lens queries: each report read one-shot from every node, with its params;
+    a report queried more than once, with the rows of each read."""
+
+    async def one(name: str, params: Mapping[str, Any]) -> tuple[str, list[Record]]:
+        results = await collect(nodes, [REGISTRY[name]], rpc_timeout=rpc_timeout, params=params)
+        return name, [row for result in results for row in result.records.get(name, ())]
+
+    found: dict[str, list[Record]] = {}
+    for name, rows in await asyncio.gather(*(one(n, p) for n, p in queries if n in REGISTRY)):
+        found.setdefault(name, []).extend(rows)
+    return found
+
+
+def with_records(fabric: Fabric, records: Mapping[str, Sequence[Record]]) -> Fabric:
+    """*fabric* with *records* added: a lens's queried reports beside its declared ones."""
+    return dataclasses.replace(fabric, records={**fabric.records, **records}) if records else fabric
 
 
 def _validate(report: str, rows: Iterable[Mapping[str, Any]]) -> list[Record]:

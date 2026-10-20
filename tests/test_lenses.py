@@ -262,9 +262,8 @@ def test_a_lens_reads_only_what_it_declares(name: str, args: dict) -> None:
     """The engine and the history give a lens its declared reports alone."""
     spec = LENSES[name]
     full = fabric()
-    declared = dataclasses.replace(
-        full, records={r: v for r, v in full.records.items() if r in spec.requires}
-    )
+    reads = {*spec.requires, *(r for r, _ in spec.queried(full, **args))}
+    declared = dataclasses.replace(full, records={r: v for r, v in full.records.items() if r in reads})
     assert spec.run(declared, **args) == spec.run(full, **args)
 
 
@@ -399,24 +398,32 @@ def test_path_hops_are_ordered_by_hop_then_node() -> None:
     assert {(h.hop, h.lookup) for h in hops if h.node == "spine1"} <= {(1, 1)}
 
 
-def test_a_route_over_a_virtual_segment_names_it_and_whether_the_node_attaches() -> None:
+VESI = "00:01:ff:ff:ff:ff:ff:ff:ff:06"
+
+
+def _aliased(rt5: bool = True) -> Fabric:
+    """A CE at 10.1.1.50 behind a virtual segment on every leaf, leaf1 its one
+    candidate. leaf1 and leaf2 route its 192.168.50.1/32 over the CE; leaf3 has
+    its 192.168.50.0/24 - and a default route - aliased to leaf1, from an RT5 that
+    carries the segment's ESI."""
+    from fcli.reports.bgp_rib import BgpRoute
     from fcli.reports.layer2 import DfCandidate, EsAssociation, EsNextHop, EthernetSegment
-    from fcli.reports.routing import RouteNextHop
+    from fcli.reports.routing import Egress, RouteNextHop
 
     records = lens_fabric.records()
-    vesi = "00:01:ff:ff:ff:ff:ff:ff:ff:06"
     candidates = (DfCandidate(address="10.0.0.1"),)
-    for node in ("leaf1", "leaf2"):
+    for node in lens_fabric.LEAVES:
         records["es"].append(
             EthernetSegment(
                 node=node,
                 name="vES-1",
-                esi=vesi,
+                esi=VESI,
                 type="virtual",
                 next_hops=(EsNextHop(address="10.1.1.50", evis=("2",)),),
                 associations=(EsAssociation(ni="ipvrf-1", candidates=candidates),),
             )
         )
+    for node in ("leaf1", "leaf2"):
         records["ipv4-rib"].append(
             Route(
                 node=node,
@@ -427,17 +434,69 @@ def test_a_route_over_a_virtual_segment_names_it_and_whether_the_node_attaches()
                 next_hops=(RouteNextHop(address="10.1.1.50"),),
             )
         )
-    found = {
-        s.node: s
-        for s in LENSES["where"].run(dataclasses.replace(fabric(), records=records), address="192.168.50.1")
-    }
-    assert (found["leaf1"].segment, found["leaf1"].esi, found["leaf1"].attached) == ("vES-1", vesi, True)
-    assert found["leaf2"].attached is False
+    tunnel = Egress(kind="tunnel", tunnel="vxlan", value="10.0.0.1", vni=200)
+    for prefix in ("192.168.50.0/24", "0.0.0.0/0"):
+        records["ipv4-rib"].append(
+            Route(
+                node="leaf3",
+                ni="ipvrf-1",
+                prefix=prefix,
+                type="bgp-evpn",
+                active=True,
+                next_hops=(RouteNextHop(address="10.0.0.1", egress=(tunnel,)),),
+            )
+        )
+    # Advertised by leaf2, which peers with the CE; the route-table aliases it to leaf1.
+    records["bgp-rib-evpn-5"] = (
+        [
+            BgpRoute(
+                node="leaf3",
+                ni="default",
+                family="evpn",
+                route_type="5",
+                prefix="192.168.50.0/24",
+                esi=VESI,
+                gateway="0.0.0.0",
+                next_hop="10.0.0.2",
+            )
+        ]
+        if rt5
+        else []
+    )
+    return dataclasses.replace(fabric(), records=records)
+
+
+def test_a_route_over_a_virtual_segment_names_it_and_whether_the_node_attaches() -> None:
     from fcli.render import cells
 
+    found = {s.node: s for s in LENSES["where"].run(_aliased(), address="192.168.50.1")}
+    assert (found["leaf1"].segment, found["leaf1"].esi, found["leaf1"].attached) == ("vES-1", VESI, True)
+    assert found["leaf2"].attached is False
     where = cells(LENSES["where"], found["leaf1"])["where"]
-    assert where == f"bgp route 192.168.50.1/32 via 10.1.1.50; ES vES-1 ({vesi})"
+    assert where == f"bgp route 192.168.50.1/32 via 10.1.1.50; L3-aliasing active, ES vES-1 ({VESI})"
     assert cells(LENSES["where"], found["leaf2"])["where"].endswith(", not attached here")
     # A route over no segment's next-hop names none.
     (plain,) = [s for s in _run("where", address="10.1.1.20") if s.kind == "route"]
     assert (plain.esi, plain.attached) == ("", None)
+
+
+def test_a_route_aliased_to_the_candidates_names_the_segment_its_rt5_carries() -> None:
+    (leaf3,) = [s for s in LENSES["where"].run(_aliased(), address="192.168.50.1") if s.node == "leaf3"]
+    # Its longest match, not the default route.
+    assert leaf3.prefix == "192.168.50.0/24"
+    assert (leaf3.segment, leaf3.esi, leaf3.attached) == ("vES-1", VESI, False)
+    # Without the RT5 - at an instant of the history - its route-table alone names none.
+    found = {s.node: s for s in LENSES["where"].run(_aliased(rt5=False), address="192.168.50.1")}
+    assert (found["leaf3"].esi, found["leaf1"].esi) == ("", VESI)
+
+
+def test_where_queries_the_rt5s_of_the_prefixes_an_ip_is_routed_by_over_evpn() -> None:
+    where = LENSES["where"]
+    # leaf3's longest match; leaf1 and leaf2 route over the CE, not EVPN.
+    assert where.queried(_aliased(), address="192.168.50.1") == [
+        ("bgp-rib-evpn-5", {"ip_prefix": "192.168.50.0/24"})
+    ]
+    assert where.queried(fabric(), address="10.1.1.20") == [("bgp-rib-evpn-5", {"ip_prefix": "10.1.1.20/32"})]
+    assert where.queried(fabric(), address="10.9.9.9") == []
+    assert where.queried(fabric(), address=HOST_A) == []
+    assert LENSES["path"].queried(fabric(), source="leaf1", destination="10.1.1.20") == []

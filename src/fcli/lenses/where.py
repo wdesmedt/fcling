@@ -4,10 +4,15 @@ For a MAC, the bridge tables: where it was learned locally, where it was
 learned over the overlay and from whom, and the ARP and ND entries that
 resolve to it. For an IP, the subinterfaces it is configured on, the ARP and ND
 entries for it - each followed into the bridge table behind its irb to the
-port, segment or VTEP the host sits on - and the host routes BGP installed for
-it. A host route whose next-hop a virtual ethernet-segment of the node tracks
-(IP aliasing) names that segment, and whether the node is one of its
-candidates: only then does it advertise the segment's A/D routes.
+port, segment or VTEP the host sits on - and the route each instance would
+use for it: its longest match, unless that is a local, host or default route,
+which say nothing of where the address is. A route of IP aliasing names the
+virtual ethernet-segment of the node behind it: the one tracking its next-hop,
+or - where the node aliases it to the segment's candidates, and its
+route-table no longer shows that next-hop - the one whose ESI the route's
+prefix carries in its EVPN IP-prefix route, queried from the BGP RIB when
+asked. It says too whether the node is one of the segment's candidates: only
+then does it advertise the segment's A/D routes.
 
 A MAC learned locally on several nodes is a duplicate - unless every one of
 those ports is on the same ethernet-segment, where it is a host multihomed
@@ -23,6 +28,7 @@ from typing import Any, ClassVar
 from ..fabric import Fabric
 from ..lens import Arg, LensError, lens
 from ..report import Column, Record
+from ..reports.bgp_rib import report_name
 from ..reports.routing import Route
 from .common import Index, ip, mac
 
@@ -73,7 +79,7 @@ def _where(s: Sighting) -> str:
     if s.kind == "route":
         text = f"{s.route_type} route {s.prefix} via {', '.join(s.next_hops) or '?'}"
         if s.esi:
-            text += f"; ES {s.segment} ({s.esi})" + ("" if s.attached else ", not attached here")
+            text += f"; L3-aliasing active, ES {s.segment} ({s.esi})" + ("" if s.attached else ", not attached here")
         return text
     parts = []
     if s.learned_on:
@@ -104,6 +110,28 @@ _COLUMNS = (
 # ni: the system addresses that name a route's VTEPs.
 _REQUIRES = ("mac", "arp", "nd", "es", "services", "subif", "ipv4-rib", "ipv6-rib", "lldp", "ni")
 
+#: The EVPN IP-prefix routes: queried for the prefixes routed over EVPN, never streamed whole.
+_RT5 = report_name("evpn", "5")
+_NO_ESI = "00:00:00:00:00:00:00:00:00:00"
+
+
+def _matches(index: Index, target: Any) -> Iterator[tuple[str, str, Route]]:
+    """``(node, instance, route)``: each instance's longest match for *target*,
+    where it says where the address is - not a local, host or default route."""
+    for node, ni, version in index.routes:
+        route = index.lookup(node, ni, target) if version == target.version else None
+        if route is not None and route.type not in ("local", "host") and not route.prefix.endswith("/0"):
+            yield node, ni, route
+
+
+def _queries(fabric: Fabric, address: str) -> list[tuple[str, dict[str, Any]]]:
+    """The prefixes an IP is routed by over EVPN, in the IP-prefix RIB: the ESI each is aliased to."""
+    target = ip(address) if not mac(address) else None
+    if target is None:
+        return []
+    routed = {r.prefix for _, _, r in _matches(Index(fabric), target) if r.type.startswith("bgp-evpn")}
+    return [(_RT5, {"ip_prefix": prefix}) for prefix in sorted(routed)]
+
 
 def _egress_interfaces(index: Index, route: Route) -> list[str]:
     """Where a route's next-hops leave: a subinterface, or a tunnel and its VNI to its
@@ -122,12 +150,15 @@ def _egress_interfaces(index: Index, route: Route) -> list[str]:
     return [f"{name} to {', '.join(ends)}" if ends else name for name, ends in found.items()]
 
 
-def _virtual_es(index: Index, node: str, route: Route) -> dict[str, Any]:
-    """The virtual segment of *node* tracking one of *route*'s next-hops, in its
-    instance; and whether the node is one of the segment's candidates there."""
+def _virtual_es(index: Index, node: str, route: Route, esis: set[str]) -> dict[str, Any]:
+    """The virtual segment of *node* behind *route*, in its instance: tracking one
+    of its next-hops, or with one of *esis*, those its EVPN IP-prefix routes carry;
+    and whether the node is one of the segment's candidates there."""
     hops = {nh.address for nh in route.next_hops}
     for es in index.fabric.get("es"):
-        if es.node != node or es.type != "virtual" or not hops & {nh.address for nh in es.next_hops}:
+        if es.node != node or es.type != "virtual":
+            continue
+        if not hops & {nh.address for nh in es.next_hops} and es.esi.lower() not in esis:
             continue
         served = [a for a in es.associations if a.ni == route.ni]
         if es.associations and not served:
@@ -165,6 +196,7 @@ def _follow(index: Index, node: str, interface: str, address: str) -> dict[str, 
     record=Sighting,
     args=[Arg("address", "the IP or MAC address to look for", required=True)],
     columns=_COLUMNS,
+    queries=_queries,
 )
 def where(fabric: Fabric, address: str) -> Iterator[Sighting]:
     index = Index(fabric)
@@ -258,22 +290,23 @@ def _ip(index: Index, target: object) -> Iterator[Sighting]:
             else (),
             **found,
         )
-    host = 32 if getattr(target, "version", 4) == 4 else 128
-    for (node, ni, _version), routes in index.routes.items():
-        for r in routes:
-            if r.prefix == f"{text}/{host}" and r.type not in ("local", "host"):
-                yield Sighting(
-                    node=node,
-                    kind="route",
-                    ni=ni,
-                    address=text,
-                    ip=text,
-                    interface="; ".join(_egress_interfaces(index, r)),
-                    prefix=r.prefix,
-                    route_type=r.type,
-                    next_hops=tuple(
-                        nh.address + (f" ({', '.join(h.label for h in nh.egress)})" if nh.egress else "")
-                        for nh in r.next_hops
-                    ),
-                    **_virtual_es(index, node, r),
-                )
+    esis: dict[tuple[str, str], set[str]] = {}
+    for rt5 in index.fabric.get(_RT5):
+        if rt5.esi and rt5.esi != _NO_ESI:
+            esis.setdefault((rt5.node, rt5.prefix), set()).add(rt5.esi.lower())
+    for node, ni, r in _matches(index, target):
+        yield Sighting(
+            node=node,
+            kind="route",
+            ni=ni,
+            address=text,
+            ip=text,
+            interface="; ".join(_egress_interfaces(index, r)),
+            prefix=r.prefix,
+            route_type=r.type,
+            next_hops=tuple(
+                nh.address + (f" ({', '.join(h.label for h in nh.egress)})" if nh.egress else "")
+                for nh in r.next_hops
+            ),
+            **_virtual_es(index, node, r, esis.get((node, r.prefix), set())),
+        )

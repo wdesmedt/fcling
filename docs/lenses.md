@@ -35,8 +35,10 @@ Every place in the fabric that knows an IP or a MAC.
 | `local`, `remote` | a MAC learned on this node's port, or over the overlay from a VTEP or a segment |
 | `multihomed` | learned locally on several nodes, all on one ethernet-segment: as intended |
 | `duplicate` | learned locally on several nodes on no common segment, or one IP bound to different MACs |
-| `route` | a host route to the IP, and what it resolves over. Over a next-hop a virtual ethernet-segment of the node tracks (IP aliasing), the segment's name and ESI, and `not attached here` when the node is not one of its candidates for the instance: it then advertises none of the segment's A/D routes. |
+| `route` | the route each instance would use for the IP, its longest match, and what it resolves over. A local, host or default route is left out: it says nothing of where the address is. With IP aliasing, `L3-aliasing active` and the node's virtual ethernet-segment behind it, by name and ESI: the one tracking the route's next-hop, or the one whose ESI the route's prefix carries in its EVPN IP-prefix route (RT5), where the node aliases it to the segment's candidates and its route-table shows them instead. `not attached here` when the node is not one of the candidates for the instance: it then advertises none of the segment's A/D routes. |
 | `not-found` | nowhere |
+
+For an IP, `where` also reads RT5s from each node's BGP RIB when asked, keyed by each prefix a node routes the IP by over EVPN; no engine streams that RIB whole. With `--at`, the history has no such read, so a route aliased only by its RT5 names no segment.
 
 ## `path SOURCE DESTINATION [--ni NI]`
 
@@ -114,4 +116,4 @@ Over HTTP: `GET /api/lenses` lists the lenses with their arguments and columns. 
 def where(fabric: Fabric, address: str) -> Iterator[Sighting]: ...
 ```
 
-Look things up through `Index` in [lenses/common.py](../src/fcli/lenses/common.py), so two lenses can't read one fact differently. `requires` must name every report the lens reads, including those behind `Index` (loopbacks come from `ni`). From the history or the engine, a report not named there is empty. Raise `LensError` for an argument that makes no sense: every surface shows its message. A required argument becomes a positional on the command line, and an optional one becomes an option. Set `ordered=True` when the rows' order is the answer, as with a path's hops.
+Look things up through `Index` in [lenses/common.py](../src/fcli/lenses/common.py), so two lenses can't read one fact differently. `requires` must name every report the lens reads, including those behind `Index` (loopbacks come from `ni`). From the history or the engine, a report not named there is empty. Raise `LensError` for an argument that makes no sense: every surface shows its message. A required argument becomes a positional on the command line, and an optional one becomes an option. `queries=` names reports to read from the nodes when the lens is asked, keyed by its arguments and what its declared reports hold, such as one prefix of a BGP RIB: a function of the fabric and the arguments, returning `(report, params)` pairs. The history has no such reads. Set `ordered=True` when the rows' order is the answer, as with a path's hops.

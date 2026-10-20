@@ -172,6 +172,16 @@ def _lens(name: str) -> Any:
     return found
 
 
+def _queries(spec: Any, fabric: Any, args: dict[str, Any] | None) -> list[tuple[str, dict[str, Any]]]:
+    """The reports a lens reads from the nodes for *args* over *fabric*, and their params."""
+    from .lens import LensError
+
+    try:
+        return spec.queried(fabric, **(args or {}))  # type: ignore[no-any-return]
+    except LensError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 def _run_lens(spec: Any, fabric: Any, args: dict[str, Any] | None) -> list[dict[str, Any]]:
     from .lens import LensError
 
@@ -556,7 +566,10 @@ class EngineService:
     ) -> dict[str, Any]:
         spec = _lens(name)
         fabric = await self._fabric(spec.requires, at)
-        return {"lens": name, "records": _run_lens(spec, fabric, args)}
+        # The history has no queried reads: at an instant, the lens answers without them.
+        queries = _queries(spec, fabric, args) if at is None else []
+        queried = await views.queried_now(self.fabric.nodes, queries, self.rpc_timeout)
+        return {"lens": name, "records": _run_lens(spec, views.with_records(fabric, queried), args)}
 
     async def topology(self, at: str | None = None) -> dict[str, Any]:
         from .topology import REQUIRES
@@ -762,7 +775,9 @@ class LocalService:
         if at:
             raise ServiceError(_NO_HISTORY)
         fabric = await views.fabric_now(self.fabric.nodes, spec.requires, self.rpc_timeout)
-        return {"lens": name, "records": _run_lens(spec, fabric, args)}
+        queries = _queries(spec, fabric, args)
+        queried = await views.queried_now(self.fabric.nodes, queries, self.rpc_timeout)
+        return {"lens": name, "records": _run_lens(spec, views.with_records(fabric, queried), args)}
 
     async def topology(self, at: str | None = None) -> dict[str, Any]:
         from .topology import REQUIRES
