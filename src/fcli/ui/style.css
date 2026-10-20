@@ -353,6 +353,52 @@ main.loading {
   color: var(--muted);
 }
 
+main.sign-in {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  padding: 16px;
+}
+
+.sign-in-card {
+  display: grid;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 20px 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.sign-in-card h2,
+.sign-in-card p {
+  margin: 0;
+}
+
+.sign-in-card .small {
+  font-size: 12px;
+}
+
+.sign-in-card input {
+  font: inherit;
+  font-family: var(--mono);
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.sign-in-card input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.sign-in-card button {
+  justify-self: start;
+}
+
 /* ---------------------------------------------------------------- topology */
 
 main.split {

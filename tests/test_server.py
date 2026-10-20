@@ -206,6 +206,8 @@ def test_the_token_in_the_ui_link_lets_other_tabs_in(target: FakeTarget, tmp_pat
         assert client.get("/api/status").status_code == 401
         cookie = client.get("/", params={"token": "s3cret"}).headers["set-cookie"]
         assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+        # Kept past a browser restart, not only for the session.
+        assert f"Max-Age={400 * 24 * 3600}" in cookie
         # A new tab: no token in its link or its script, only the cookie.
         assert client.get("/api/status").status_code == 200
         assert "set-cookie" not in client.get("/", params={"token": "s3cret"}).headers

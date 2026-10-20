@@ -1,7 +1,7 @@
 // fCLI's web UI: the shell - routing, the header, the navigation panel, the agent - around the views.
 
 import { html, render, useEffect, useMemo, useRef, useState } from "./vendor/preact-htm.module.js";
-import { follow, get, hashQuery } from "./api.js";
+import { follow, get, hashQuery, signIn } from "./api.js";
 import { ChatPanel } from "./chat.js";
 import { HistoryView } from "./history.js";
 import { Incidents } from "./incidents.js";
@@ -184,6 +184,41 @@ function describe(route, at) {
   return { view, at };
 }
 
+/** In place of the page while the server wants a token this browser has not given it. */
+function SignIn() {
+  const [value, setValue] = useState("");
+  const [wrong, setWrong] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    const candidate = value.trim();
+    if (!candidate) return;
+    setBusy(true);
+    try {
+      setWrong(!(await signIn(candidate)));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<main class="sign-in">
+    <form class="sign-in-card" onSubmit=${submit}>
+      <h2>Sign in</h2>
+      <p class="muted">
+        This server wants its token. It is in the address <code>fcling serve</code> printed when it started
+        (<code>?token=…</code>), and in the <code>.token</code> file next to its history.
+      </p>
+      <input type="password" autocomplete="current-password" placeholder="token" aria-label="token" autofocus
+             value=${value} onInput=${(e) => {
+               setValue(e.target.value);
+               setWrong(false);
+             }} />
+      ${wrong && html`<p class="error-text">That is not this server's token.</p>`}
+      <button class="primary" type="submit" disabled=${busy || !value.trim()}>Sign in</button>
+      <p class="muted small">This browser then keeps it, for this address, across restarts.</p>
+    </form>
+  </main>`;
+}
+
 function App() {
   const [route, go] = useRoute();
   const toggleTheme = useTheme();
@@ -192,6 +227,7 @@ function App() {
   const [data, setData] = useState(null);
   const [catalog, setCatalog] = useState([]);
   const [error, setError] = useState("");
+  const [locked, setLocked] = useState(false);
   const [connection, setConnection] = useState("connecting");
   const [navCollapsed, setNavCollapsed] = useState(() => stored("fcli-nav", "") === "collapsed");
   const [navOpen, setNavOpen] = useState(false); // narrow screens: the panel over the page
@@ -223,6 +259,7 @@ function App() {
       setData({ topology, checks, incidents });
       setError("");
     } catch (e) {
+      setLocked(e.status === 401);
       setError(e.message);
     }
   };
@@ -294,7 +331,9 @@ function App() {
   const shared = { go, at, graph: data?.topology, status, checks: data?.checks ?? [], query: route.query };
 
   let page;
-  if (!data) {
+  if (locked) {
+    page = html`<${SignIn} />`;
+  } else if (!data) {
     page = html`<main class="loading">${error ? "" : "Reading the fabric…"}</main>`;
   } else if (route.view === "topology") {
     page = html`<main class=${`split${detailsCollapsed ? " details-collapsed" : ""}`}>
@@ -340,7 +379,7 @@ function App() {
   return html`
     <${Header} status=${status} connection=${connection} at=${at} onAt=${setAt} toggleTheme=${toggleTheme}
                onMenu=${toggleNav} onChat=${() => setChatOpen(!chatOpen)} chatOpen=${chatOpen} go=${go} />
-    ${error && html`<div class="banner error">${error}</div>`}
+    ${error && !locked && html`<div class="banner error">${error}</div>`}
     ${at && html`<div class="banner past">Showing the fabric as the history has it at <b>${at}</b>. Live changes are paused.</div>`}
     <div class=${`shell${navOpen ? " nav-open" : ""}${chatOpen ? " chat-open" : ""}`}>
       <${Nav} route=${route} catalog=${catalog} status=${status} incidents=${data?.incidents ?? []}

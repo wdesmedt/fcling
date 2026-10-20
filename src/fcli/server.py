@@ -93,13 +93,16 @@ class _Revalidated(StaticFiles):
 
 #: The cookie a browser keeps the token in, so every tab it opens on the UI is let in.
 COOKIE = "fcli-token"
+#: How long it is kept: past a browser restart, and as long as browsers allow (Chrome caps at 400 days).
+COOKIE_AGE = 400 * 24 * 3600
 
 
 class _Auth:
     """Plain ASGI, so a streamed response passes through untouched.
 
-    A right ``?token=`` also sets :data:`COOKIE` (HttpOnly, SameSite=Strict):
-    the UI opened once with it, links opened from it in new tabs need none.
+    A right ``?token=`` also sets :data:`COOKIE` (HttpOnly, SameSite=Strict, kept
+    :data:`COOKIE_AGE`): the UI opened once with it, links opened from it in new
+    tabs, and the UI opened again after the browser restarts, need none.
     """
 
     def __init__(self, app: ASGIApp, token: str) -> None:
@@ -125,7 +128,7 @@ class _Auth:
                 await JSONResponse({"error": "unauthorized"}, status_code=401)(scope, receive, send)
                 return
         if self._right(offered) and request.cookies.get(COOKIE) != offered:
-            cookie = f"{COOKIE}={offered}; Path=/; HttpOnly; SameSite=Strict"
+            cookie = f"{COOKIE}={offered}; Path=/; Max-Age={COOKIE_AGE}; HttpOnly; SameSite=Strict"
             if scope.get("scheme") == "https":
                 cookie += "; Secure"
 

@@ -80,6 +80,19 @@ export async function get(path, params = {}) {
   return body;
 }
 
+/**
+ * Whether *candidate* is the server's token; if so the page opens again with it,
+ * so the server sets its cookie and the token leaves the address bar as above.
+ */
+export async function signIn(candidate) {
+  const response = await fetch(url("/api/status"), { headers: { Authorization: `Bearer ${candidate}` } });
+  if (!response.ok) return false;
+  const again = new URLSearchParams(location.search);
+  again.set("token", candidate);
+  location.replace(`${location.pathname}?${again}${location.hash}`);
+  return true;
+}
+
 /** POST or DELETE to the API: *body* as JSON when given; the answer, or an ApiError. */
 export async function send(method, path, { params = {}, body } = {}) {
   const response = await fetch(url(path, params), {
