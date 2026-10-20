@@ -1747,6 +1747,13 @@ form.lens-form select {
   padding: 2px 8px;
 }
 
+.interface-reports {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+
 .carrier-detail-toolbar {
   display: flex;
   align-items: center;

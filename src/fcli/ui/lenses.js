@@ -341,6 +341,45 @@ function goEthernetSegment(node, segment, go) {
   go(withQuery("report/es", params));
 }
 
+/**
+ * The reports about one of a service's interfaces on *node*: its own first, then its
+ * port's counters and the tables learned on it. *p* is a port of a services record.
+ */
+function interfaceReports(node, ni, type, p) {
+  const port = p.name.replace(/\.\d+$/, "");
+  const own =
+    p.kind === "irb"
+      ? ["irb", "irb", { "f.name": fEq(p.name) }]
+      : ["subif", "subinterface", { "f.Subitf": fEq(p.name) }];
+  const learned =
+    type === "mac-vrf"
+      ? [["mac", "MACs", { "f.NI": fEq(ni), "f.Dest": fEq(p.name) }]]
+      : [
+          ["arp", "ARP", { "f.interface": fEq(p.name) }],
+          ["nd", "ND", { "f.interface": fEq(p.name) }],
+        ];
+  const stats = p.kind === "irb" ? [] : [["ifstats", "stats", { "f.interface": fEq(port) }]];
+  return [own, ...stats, ...learned].map(([report, label, filters]) => ({
+    report,
+    label,
+    to: withQuery(`report/${report}`, { node, ...filters }),
+  }));
+}
+
+function interfaceLinks({ node, ni, type, p, go }) {
+  const [own, ...rest] = interfaceReports(node, ni, type, p);
+  const open = (to) => (e) => {
+    e.stopPropagation();
+    go(to);
+  };
+  return {
+    name: html`<a class="mono" title=${`${p.name} in the ${own.label} report`} onClick=${open(own.to)}>${p.name}</a>`,
+    more: html`<span class="interface-reports">${rest.map(
+      (r) => html`<a key=${r.report} title=${`${p.name} in the ${r.report} report`} onClick=${open(r.to)}>${r.label}</a>`,
+    )}</span>`,
+  };
+}
+
 function parseVirtualEs(label) {
   const m = /^(.+?)\s*\(/.exec(label);
   return (m ? m[1] : label).trim();
@@ -440,10 +479,11 @@ function NodeDetail({ r, go }) {
     ${r.ports.length > 0 &&
     html`<${DetailSection} title="Interfaces">
       <table class="mini">
-        <thead><tr><th>interface</th><th>kind</th><th>oper</th><th>VLAN</th><th>segment</th><th>to / addresses</th></tr></thead>
-        <tbody>${r.ports.map(
-          (p) => html`<tr>
-            <td class="mono">${p.name}</td><td>${p.kind}</td>
+        <thead><tr><th>interface</th><th>kind</th><th>oper</th><th>VLAN</th><th>segment</th><th>to / addresses</th><th>reports</th></tr></thead>
+        <tbody>${r.ports.map((p) => {
+          const links = interfaceLinks({ node: r.node, ni: r.name, type: r.type, p, go });
+          return html`<tr>
+            <td>${links.name}</td><td>${p.kind}</td>
             <td><span class=${`pill state-${p.oper === "up" ? "up" : "down"}`}>${p.oper || "?"}</span></td>
             <td>${p.vlan ?? ""}</td>
             <td>${p.segment || p.esi
@@ -456,8 +496,9 @@ function NodeDetail({ r, go }) {
                 : html`<${NiLink} nodes=${r.node} name=${p.peer_ni} go=${go} />`)}
               ${p.peer_ni && (p.addresses || []).length ? ", " : ""}${(p.addresses || []).join(", ")}
             </td>
-          </tr>`,
-        )}</tbody>
+            <td>${links.more}</td>
+          </tr>`;
+        })}</tbody>
       </table>
     </${DetailSection}>`}
     ${r.vpn.length > 0 &&
