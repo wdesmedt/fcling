@@ -5,8 +5,10 @@ learned over the overlay and from whom, and the ARP and ND entries that
 resolve to it. For an IP, the subinterfaces it is configured on, the ARP and ND
 entries for it - each followed into the bridge table behind its irb to the
 port, segment or VTEP the host sits on - and the route each instance would
-use for it: its longest match, unless that is a local, host or default route,
-which say nothing of where the address is. A route of IP aliasing names the
+use for it: its longest match, unless that is a host or default route, which
+say nothing of where the address is. A connected subnet's local route is one
+only where the node neither has the IP nor a binding for it there: the subnet
+it would be resolved in, unresolved. A route of IP aliasing names the
 virtual ethernet-segment of the node behind it: the one tracking its next-hop,
 or - where the node aliases it to the segment's candidates, and its
 route-table no longer shows that next-hop - the one whose ESI the route's
@@ -78,6 +80,8 @@ def _where(s: Sighting) -> str:
     """Where the address sits, in one phrase."""
     if s.kind == "route":
         text = f"{s.route_type} route {s.prefix} via {', '.join(s.next_hops) or '?'}"
+        if s.route_type == "local":
+            text += f"; no {'ND' if ':' in s.address else 'ARP'} entry"
         if s.esi:
             text += f"; L3-aliasing active, ES {s.segment} ({s.esi})"
             text += "" if s.attached else ", not attached here"
@@ -118,10 +122,10 @@ _NO_ESI = "00:00:00:00:00:00:00:00:00:00"
 
 def _matches(index: Index, target: Any) -> Iterator[tuple[str, str, Route]]:
     """``(node, instance, route)``: each instance's longest match for *target*,
-    where it says where the address is - not a local, host or default route."""
+    where it says where the address is - not a host or default route."""
     for node, ni, version in index.routes:
         route = index.lookup(node, ni, target) if version == target.version else None
-        if route is not None and route.type not in ("local", "host") and not route.prefix.endswith("/0"):
+        if route is not None and route.type != "host" and not route.prefix.endswith("/0"):
             yield node, ni, route
 
 
@@ -256,9 +260,12 @@ def _mac(index: Index, target: str) -> Iterator[Sighting]:
 
 def _ip(index: Index, target: object) -> Iterator[Sighting]:
     text = str(target)
+    #: ``(node, instance)``: where the IP is configured or bound - and its subnet's local route says no more.
+    known: set[tuple[str, str]] = set()
     for s in index.fabric.get("subif"):
         for prefix in (*s.ipv4, *s.ipv6):
             if ip(prefix) == target:
+                known.update((s.node, ni) for ni in index.ni_of(s.node, s.name))
                 yield Sighting(
                     node=s.node,
                     kind="configured",
@@ -275,6 +282,7 @@ def _ip(index: Index, target: object) -> Iterator[Sighting]:
             macs_by_node.setdefault(b.node, set()).add(mac(b.mac))
     distinct = {m for ms in macs_by_node.values() for m in ms if m}
     for b in bindings:
+        known.update((b.node, ni) for ni in b.nis)
         found = _follow(index, b.node, b.interface, mac(b.mac))
         duplicate = len(distinct) > 1 and b.origin != "evpn"
         yield Sighting(
@@ -296,6 +304,8 @@ def _ip(index: Index, target: object) -> Iterator[Sighting]:
         if rt5.esi and rt5.esi != _NO_ESI:
             esis.setdefault((rt5.node, rt5.prefix), set()).add(rt5.esi.lower())
     for node, ni, r in _matches(index, target):
+        if r.type == "local" and (node, ni) in known:
+            continue
         yield Sighting(
             node=node,
             kind="route",

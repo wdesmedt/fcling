@@ -558,8 +558,21 @@ def test_a_route_over_a_virtual_segment_names_it_and_whether_the_node_attaches()
     assert where == f"bgp route 192.168.50.1/32 via 10.1.1.50; L3-aliasing active, ES vES-1 ({VESI})"
     assert cells(LENSES["where"], found["leaf2"])["where"].endswith(", not attached here")
     # A route over no segment's next-hop names none.
-    (plain,) = [s for s in _run("where", address="10.1.1.20") if s.kind == "route"]
+    (plain,) = [s for s in _run("where", address="10.1.1.20") if s.kind == "route" and s.node == "leaf1"]
     assert (plain.esi, plain.attached) == ("", None)
+
+
+def test_a_subnet_routed_locally_where_the_ip_is_unbound_is_where_it_would_be_resolved() -> None:
+    from fcli.render import cells
+
+    routes = {s.node: s for s in _run("where", address="10.1.1.20") if s.kind == "route"}
+    # leaf2 has the subnet on irb0.1, but no ARP entry or host route for the IP.
+    assert (routes["leaf2"].prefix, routes["leaf2"].route_type) == ("10.1.1.0/24", "local")
+    assert cells(LENSES["where"], routes["leaf2"])["where"] == (
+        "local route 10.1.1.0/24 via 10.1.1.1 (irb0.1); no ARP entry"
+    )
+    # Where the IP is bound, its ARP entry says where it is; the subnet adds nothing.
+    assert [s.node for s in _run("where", address="10.1.1.20") if s.route_type == "local"] == ["leaf2"]
 
 
 def test_a_route_aliased_to_the_candidates_names_the_segment_its_rt5_carries() -> None:
