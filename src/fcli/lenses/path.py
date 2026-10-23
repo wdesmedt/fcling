@@ -18,6 +18,11 @@ A MAC destination is looked up in the bridge tables instead: learned on a port
 it is delivered there; learned from a VTEP it is a tunnel to it; behind an
 ethernet-segment, one tunnel per VTEP of the segment - aliasing.
 
+An IP destination routed into an irb's subnet whose MAC the bridge table behind
+the irb has from a VTEP is ``bridged``: the walk goes on in that MAC-VRF,
+re-encapsulated on its VNI to the VTEPs that have the host - the hairpin a
+missing host route makes visible.
+
 A host as the source - its IP or MAC - adds an ingress hop on each node it
 is attached to: the port and segment it enters the fabric on.
 
@@ -73,9 +78,11 @@ class Hop(Record):
     #: :attr:`egress` to :attr:`peer`. ``tunnel``: into a tunnel to
     #: :attr:`endpoint`. ``endpoint-reached``: decapsulated here, the walk resumes
     #: in :attr:`resumes_in`. ``leaked``: forwarded by :attr:`resumes_in`'s
-    #: next-hops. ``delivered``: attached here, out of :attr:`egress`, to
-    #: :attr:`mac` where ARP/ND or the bridge table has it. ``no-neighbor``:
-    #: attached, with no ARP/ND entry for it. ``handed-off``: out of a port with
+    #: next-hops. ``bridged``: routed into an irb's subnet whose host the
+    #: bridge table has from a VTEP: bridged on in :attr:`resumes_in`.
+    #: ``delivered``: attached here, out of :attr:`egress`, to :attr:`mac` where
+    #: ARP/ND or the bridge table has it. ``no-neighbor``: attached, with no
+    #: ARP/ND entry for it. ``handed-off``: out of a port with
     #: no fabric node behind it, to :attr:`gateway`. ``local-ip``: the node's
     #: own. ``dead-end``, ``discard``, ``unresolved``, ``no-route``, ``loop``,
     #: ``too-long``: where a walk stops.
@@ -111,7 +118,7 @@ def _via(h: Hop) -> str:
 def _then(h: Hop) -> str:
     if h.outcome == "forwarded":
         return f"{h.peer} {h.peer_port}"
-    if h.outcome in ("endpoint-reached", "leaked"):
+    if h.outcome in ("endpoint-reached", "leaked", "bridged"):
         return f"resume in {h.resumes_in}"
     if h.mac:
         return h.mac
@@ -149,13 +156,23 @@ class _Step:
     #: Chasing a tunnel endpoint: the instance to resume in, and the instance
     #: on the origin node whose route-targets say which one that is.
     resume: tuple[str, str, str] | None = None
+    #: Chasing a tunnel endpoint: what to look up once there, when not the
+    #: destination - the MAC a routed destination was bridged to.
+    inner: Any = None
 
     def next(
-        self, node: str, ni: str, address: Any, seen: tuple[str, ...], resume: tuple[str, str, str] | None
+        self,
+        node: str,
+        ni: str,
+        address: Any,
+        seen: tuple[str, ...],
+        resume: tuple[str, str, str] | None,
+        inner: Any = None,
     ) -> _Step:
         """The lookup after this one: on this node the next lookup, on another the next hop."""
         hop, lookup = (self.hop, self.lookup + 1) if node == self.node else (self.hop + 1, 1)
-        return _Step(node, ni, address, self.depth + 1, hop, lookup, seen, resume)
+        carried = (inner if inner is not None else self.inner) if resume is not None else None
+        return _Step(node, ni, address, self.depth + 1, hop, lookup, seen, resume, carried)
 
 
 def _peer_ni(index: Index, node: str, port: str, default: str) -> str:
@@ -176,6 +193,15 @@ def _resume(index: Index, node: str, origin_node: str, origin_ni: str, want: str
         if n == node and exported & set(s.import_rts):
             return ni
     return ""
+
+
+def _resumes(index: Index, resume: tuple[str, str, str] | None) -> Any:
+    """What decides where a chase resumes: the instance wanted, and the origin's exports."""
+    if resume is None:
+        return None
+    want, origin_node, origin_ni = resume
+    origin = index.services.get((origin_node, origin_ni))
+    return want, frozenset(origin.export_rts) if origin else frozenset()
 
 
 def _cable(index: Index, node: str, port: str) -> tuple[str, str] | None:
@@ -264,8 +290,9 @@ def _walk(fabric: Fabric, source: str, destination: str, ni: str | None) -> Iter
         if where in step.seen:
             yield Hop(**here, outcome="loop")
             continue
-        # ECMP branches converge: a lookup already made is one answer, given once.
-        asked = (step.node, step.ni, str(step.address), step.resume)
+        # ECMP branches converge: a lookup already made is one answer, given once - and
+        # chases of one tunnel endpoint from two nodes are one chase where they resume alike.
+        asked = (step.node, step.ni, str(step.address), _resumes(index, step.resume), step.inner)
         if asked in made:
             continue
         made.add(asked)
@@ -386,7 +413,8 @@ def _bridge(
         )
         address = ip(endpoint)
         if address is not None:
-            pending.append(step.next(step.node, "default", address, seen, (step.ni, step.node, step.ni)))
+            resume = (step.ni, step.node, step.ni)
+            pending.append(step.next(step.node, "default", address, seen, resume, step.address))
 
 
 def _route(
@@ -399,7 +427,8 @@ def _route(
         instance = _resume(index, step.node, origin_node, origin_ni, want)
         yield Hop(**here, outcome="endpoint-reached", resumes_in=instance or "?")
         if instance:
-            pending.append(step.next(step.node, instance, target, seen, None))
+            inner = step.inner if step.inner is not None else target
+            pending.append(step.next(step.node, instance, inner, seen, None))
         return
     route = index.lookup(step.node, step.ni, address)
     if route is None:
@@ -417,7 +446,7 @@ def _route(
         pending.append(step.next(step.node, route.leaked_from, address, seen, step.resume))
         return
     if route.type in _ATTACHED:
-        yield _delivered(index, step, here, matched, route)
+        yield from _delivered(index, step, here, matched, route, seen, pending)
         return
     branches = [(nh, egress) for nh in route.next_hops for egress in nh.egress]
     if not branches:
@@ -475,8 +504,20 @@ def _route(
             yield Hop(**here, **via, outcome="unresolved", egress=egress.value)
 
 
-def _delivered(index: Index, step: _Step, here: dict[str, Any], matched: dict[str, Any], route: Any) -> Hop:
-    """An attached destination: the port it is out of, and whether ARP/ND has it."""
+def _delivered(
+    index: Index,
+    step: _Step,
+    here: dict[str, Any],
+    matched: dict[str, Any],
+    route: Any,
+    seen: tuple[str, ...],
+    pending: list[_Step],
+) -> Iterator[Hop]:
+    """An attached destination: the port it is out of, and whether ARP/ND has it.
+
+    Behind an irb whose bridge table has the host from a VTEP, it is not
+    delivered here: it is bridged on in that table, to the VTEPs.
+    """
     egress = next((h.value for nh in route.next_hops for h in nh.egress if h.kind == "interface"), "")
     bound = next(
         (
@@ -487,7 +528,8 @@ def _delivered(index: Index, step: _Step, here: dict[str, Any], matched: dict[st
         None,
     )
     if bound is None:
-        return Hop(**here, **matched, outcome="no-neighbor", egress=egress)
+        yield Hop(**here, **matched, outcome="no-neighbor", egress=egress)
+        return
     found: dict[str, Any] = {"mac": mac(bound.mac)}
     # Behind an irb, the bridge table says which port - or which VTEP - the host is on: the
     # table behind the irb it is bound on, though one host may be in several.
@@ -498,11 +540,17 @@ def _delivered(index: Index, step: _Step, here: dict[str, Any], matched: dict[st
             place = index.place(entry)
             if place.local:
                 found.update(egress=place.via, esi=place.esi, segment=place.segment)
-            else:
-                found.update(
-                    egress=f"{bridge} via VTEP {place.via}" if place.via else bridge,
-                    esi=place.esi,
-                    segment=place.segment,
-                )
-            break
-    return Hop(**here, **matched, outcome="delivered", **{"egress": egress, **found})
+                break
+            yield Hop(
+                **here,
+                **matched,
+                outcome="bridged",
+                egress=egress or bound.interface,
+                resumes_in=bridge,
+                mac=found["mac"],
+                esi=place.esi,
+                segment=place.segment,
+            )
+            pending.append(step.next(step.node, bridge, found["mac"], seen, None))
+            return
+    yield Hop(**here, **matched, outcome="delivered", **{"egress": egress, **found})

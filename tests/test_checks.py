@@ -181,7 +181,15 @@ from fcli.reports.bgp import Family  # noqa: E402
 from fcli.reports.health import IsisAdjacency, OspfNeighbor  # noqa: E402
 from fcli.reports.instances import BgpVpnInstance  # noqa: E402
 from fcli.reports.interfaces import InterfaceStats  # noqa: E402
-from fcli.reports.layer2 import DfCandidate, EsAssociation, EthernetSegment, VxlanInterface  # noqa: E402
+from fcli.reports.layer2 import (  # noqa: E402
+    DfCandidate,
+    EsAssociation,
+    EthernetSegment,
+    IrbInterface,
+    NeighborSettings,
+    VxlanInterface,
+)
+from fcli.reports.services import Port, Service  # noqa: E402
 
 
 def fab(
@@ -769,6 +777,73 @@ def test_nodes_that_elect_different_designated_forwarders_are_an_error() -> None
         "192.0.2.15 according to leaf5; 192.0.2.16 according to leaf6"
     )
     assert run("es_df", fab({"es": [segment("leaf5", "192.0.2.15"), segment("leaf6", "192.0.2.15")]})) == []
+
+
+def _ifl(ifl_host_ad: tuple[int, ...] = (), interface_less: bool = True) -> Fabric:
+    """HOST2 on es-2 in macvrf-102 on leaf1 and leaf2; irb0.102 routes it into ipvrf-1."""
+    es, irb, services = [], [], []
+    for node in ("leaf1", "leaf2"):
+        es.append(
+            EthernetSegment(
+                node=node,
+                name="ES-HOST2",
+                esi="00:01:00:00:00:00:00:00:00:02",
+                type="none",
+                mh_mode="all-active",
+                oper="up",
+                interfaces=("ethernet-1/2",),
+                associations=(EsAssociation(ni="macvrf-102"),),
+                ifl_host_ad=ifl_host_ad,
+            )
+        )
+        irb.append(
+            IrbInterface(
+                node=node,
+                name="irb0.102",
+                nis=("ipvrf-1", "macvrf-102"),
+                arp=NeighborSettings(evpn_advertise=("dynamic",), interface_less_routing=interface_less),
+            )
+        )
+        services += [
+            Service(node=node, name="macvrf-102", type="mac-vrf", linked=("ipvrf-1",)),
+            Service(
+                node=node,
+                name="ipvrf-1",
+                type="ip-vrf",
+                vnis=(1,),
+                vpn=(BgpVpnInstance(id=1, import_rts=("target:1:1",), export_rts=("target:1:1",)),),
+                ports=(Port(name="irb0.102", kind="irb", peer_ni="macvrf-102"),),
+                linked=("macvrf-102",),
+            ),
+        ]
+    return fab({"es": es, "irb": irb, "services": services})
+
+
+def test_es_ifl_host_ad_finds_a_segment_whose_hosts_are_never_installed_as_host_routes() -> None:
+    findings = run("es_ifl_host_ad", _ifl())
+    assert [(f.node, f.severity, f.subject) for f in findings] == [
+        ("leaf1", WARNING, "ES-HOST2/ipvrf-1"),
+        ("leaf2", WARNING, "ES-HOST2/ipvrf-1"),
+    ]
+    assert (
+        "advertise-ifl-host-ad-routes bgp-evpn-instance 1 on ethernet-segment ES-HOST2" in findings[0].detail
+    )
+    assert "irb0.102" in findings[0].detail
+
+
+def test_es_ifl_host_ad_says_nothing_when_the_segment_advertises_them() -> None:
+    assert run("es_ifl_host_ad", _ifl(ifl_host_ad=(1,))) == []
+
+
+def test_es_ifl_host_ad_says_nothing_without_interface_less_routing() -> None:
+    assert run("es_ifl_host_ad", _ifl(interface_less=False)) == []
+
+
+def test_es_ifl_host_ad_wants_the_ip_vrf_s_own_bgp_evpn_instance() -> None:
+    assert [f.subject for f in run("es_ifl_host_ad", _ifl(ifl_host_ad=(2,)))] == [
+        "ES-HOST2/ipvrf-1",
+        "ES-HOST2/ipvrf-1",
+    ]
 
 
 # --------------------------------------------------------------------------- running them together

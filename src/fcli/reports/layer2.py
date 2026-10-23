@@ -206,6 +206,9 @@ class EthernetSegment(Record):
     interfaces: tuple[str, ...] = ()
     next_hops: tuple[EsNextHop, ...] = ()
     associations: tuple[EsAssociation, ...] = ()
+    #: The bgp-evpn instances of its ip-vrfs it advertises A-D routes in, for
+    #: interface-less host routes: ``advertise-ifl-host-ad-routes``.
+    ifl_host_ad: tuple[int, ...] = ()
 
 
 def _es_attachment(es: EthernetSegment) -> str:
@@ -298,6 +301,13 @@ def es(node: NodeState) -> Iterator[EthernetSegment]:
                 EsAssociation(ni=str(vrf.get("name") or ""), candidates=_df_candidates(vrf))
                 for vrf in as_list(dig(seg, "association", "network-instance"))
                 if isinstance(vrf, dict)
+            ),
+            ifl_host_ad=tuple(
+                i
+                for i in (
+                    as_int(v) for v in as_list(dig(seg, "advertise-ifl-host-ad-routes", "bgp-evpn-instance"))
+                )
+                if i is not None
             ),
         )
 

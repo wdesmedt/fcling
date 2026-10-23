@@ -50,6 +50,8 @@ How the fabric would forward to an address, hop by hop. The answer comes from th
 
 The walk follows ECMP branches. It goes into VXLAN tunnels and comes out at the node that owns the far end, then resumes in the instance that imports what the origin exports. It follows leaked routes, and a MAC behind a segment is aliased over every VTEP of that segment.
 
+An IP routed into an irb's subnet is delivered only when the bridge table behind the irb has its MAC on a local port. When the MAC was learned over EVPN, from a VTEP or behind a segment, the hop is `bridged`: the walk goes on in that mac-vrf, over its VNI to the VTEPs that have the host, and is delivered there. This is the hairpin a leaf makes when it has the host's subnet but no host route for it, for example when the segment does not advertise A-D routes for interface-less host routes (see the `es_ifl_host_ad` check).
+
 Hops are numbered by node, in two columns: `hop` is the cables crossed to reach the node, and `lookup` which lookup on that node it is; `address` is what was looked up. From leaf1 to a host behind a VTEP: hop 0 lookup 1 (the VRF on leaf1, into a tunnel), hop 0 lookup 2 (the underlay on leaf1, out to the spines), hop 1 lookup 1 (each spine), hop 2 lookups 1 and 2 (the far leaf decapsulates, then looks up in its VRF). Rows are sorted by hop, node, then lookup.
 
 Each hop has an outcome:
@@ -61,6 +63,7 @@ Each hop has an outcome:
 | `tunnel` | into a VXLAN or MPLS tunnel |
 | `endpoint-reached` | the tunnel's far end, and the instance the walk resumes in |
 | `leaked` | the route was leaked from another instance, and the lookup moves there |
+| `bridged` | routed into an irb's subnet, but the host's MAC is behind a VTEP: the walk goes on in the mac-vrf behind the irb |
 | `delivered` | an attached host: its MAC, port and segment |
 | `handed-off` | out of the fabric to a next-hop ARP/ND knows |
 | `no-neighbor` | attached, but ARP/ND has no entry |
