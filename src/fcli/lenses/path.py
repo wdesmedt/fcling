@@ -195,6 +195,15 @@ def _resume(index: Index, node: str, origin_node: str, origin_ni: str, want: str
     return ""
 
 
+def _resumes(index: Index, resume: tuple[str, str, str] | None) -> Any:
+    """What decides where a chase resumes: the instance wanted, and the origin's exports."""
+    if resume is None:
+        return None
+    want, origin_node, origin_ni = resume
+    origin = index.services.get((origin_node, origin_ni))
+    return want, frozenset(origin.export_rts) if origin else frozenset()
+
+
 def _cable(index: Index, node: str, port: str) -> tuple[str, str] | None:
     for p in index.lag_members.get((node, port)) or (port,):
         if (node, p) in index.cables:
@@ -281,8 +290,9 @@ def _walk(fabric: Fabric, source: str, destination: str, ni: str | None) -> Iter
         if where in step.seen:
             yield Hop(**here, outcome="loop")
             continue
-        # ECMP branches converge: a lookup already made is one answer, given once.
-        asked = (step.node, step.ni, str(step.address), step.resume, step.inner)
+        # ECMP branches converge: a lookup already made is one answer, given once - and
+        # chases of one tunnel endpoint from two nodes are one chase where they resume alike.
+        asked = (step.node, step.ni, str(step.address), _resumes(index, step.resume), step.inner)
         if asked in made:
             continue
         made.add(asked)

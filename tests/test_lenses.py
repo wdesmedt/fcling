@@ -246,6 +246,31 @@ def test_a_routed_path_to_a_host_bridged_elsewhere_goes_on_in_its_mac_vrf() -> N
     assert (bridged.mac, bridged.segment, bridged.egress) == (HOST_A, "ES-A", "irb0.1")
 
 
+def test_branches_chasing_one_vtep_from_two_leaves_are_one_chase() -> None:
+    # Host A enters on leaf1 and leaf2; neither has a host route to host B, both bridge it to leaf3.
+    records = lens_fabric.records()
+    records["ipv4-rib"] = [r for r in records["ipv4-rib"] if r.prefix != "10.1.1.20/32"]
+    records["arp"].append(
+        NeighborEntry(
+            node="leaf2",
+            interface="irb0.1",
+            nis=("ipvrf-1", "macvrf-1"),
+            address="10.1.1.20",
+            mac=HOST_B,
+            origin="evpn",
+        )
+    )
+    run = LENSES["path"].run(
+        Fabric.of(lens_fabric.NODES, records), source="10.1.1.10", destination="10.1.1.20"
+    )
+    hops = [(h.hop, h.lookup, h.node, h.ni, h.outcome, h.peer or h.resumes_in or h.egress) for h in run]
+    assert [h for h in hops if h[2] == "leaf3" or h[1:3] == (1, "spine1")] == [
+        (1, 1, "spine1", "default", "forwarded", "leaf3"),
+        (2, 1, "leaf3", "default", "endpoint-reached", "macvrf-1"),
+        (2, 2, "leaf3", "macvrf-1", "delivered", "ethernet-1/1.1"),
+    ]
+
+
 def test_path_says_where_it_goes_nowhere() -> None:
     assert _hops("leaf2", "10.7.7.7") == [(0, 1, "leaf2", "default", "no-route", "")]
     with pytest.raises(LensError, match="no node has 10.9.9.9 attached"):
