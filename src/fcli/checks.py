@@ -22,7 +22,8 @@ from .report import Record
 from .reports.bgp import BgpPeer
 from .reports.instances import stitched
 from .reports.interfaces import Subinterface
-from .reports.layer2 import EthernetSegment
+from .reports.layer2 import EthernetSegment, IrbInterface
+from .reports.services import Service
 
 #: The fabric is not doing what it was built to do.
 ERROR = "error"
@@ -618,6 +619,56 @@ def check_es_df(fabric: Fabric) -> Iterator[Finding]:
                 esi,
                 f"multi-homing mode {by_node[node] or 'unset'}, against "
                 + ", ".join(f"{o} {by_node[o] or 'unset'}" for o in sorted(set(by_node) - {node})),
+            )
+
+
+@check(
+    "es_ifl_host_ad",
+    "Ethernet segments with interface-less host routes and no A-D routes for them",
+    ["es", "irb", "services"],
+)
+def check_es_ifl_host_ad(fabric: Fabric) -> Iterator[Finding]:
+    """An irb advertising its hosts for interface-less routing makes their MAC/IP
+    routes carry the ip-vrf's route-target; a host behind an ethernet-segment is
+    only installed as a /32 where A-D routes for the segment carry it too. Without
+    ``advertise-ifl-host-ad-routes`` on the segment the MAC/IP route is best but
+    unused: the other leaves route to the host over its subnet, and one that has
+    the subnet but not the host bridges it on again over the mac-vrf's VNI."""
+    services: dict[tuple[str, str], Service] = {(s.node, s.name): s for s in fabric.get("services")}
+    irbs: list[IrbInterface] = list(fabric.get("irb"))
+    for seg in fabric.get("es"):
+        if not seg.esi or seg.type == "virtual":
+            continue
+        bridges = {a.ni for a in seg.associations} | {
+            name
+            for (node, name), s in services.items()
+            if node == seg.node and any(p.esi == seg.esi for p in s.ports)
+        }
+        # ip-vrf -> the irbs routing into it from the segment's mac-vrfs, with interface-less routing.
+        routed: dict[str, list[str]] = {}
+        for irb in irbs:
+            if irb.node != seg.node or not (irb.arp.interface_less_routing or irb.nd.interface_less_routing):
+                continue
+            if not bridges & set(irb.nis):
+                continue
+            for ni in irb.nis:
+                vrf = services.get((seg.node, ni))
+                if vrf is not None and vrf.type == "ip-vrf":
+                    routed.setdefault(ni, []).append(irb.name)
+        for ni, names in sorted(routed.items()):
+            instances = sorted({v.id for v in services[(seg.node, ni)].vpn}) or [1]
+            if set(instances) & set(seg.ifl_host_ad):
+                continue
+            yield _f(
+                "es_ifl_host_ad",
+                WARNING,
+                seg.node,
+                f"{seg.name}/{ni}",
+                f"{', '.join(sorted(names))} advertise its hosts for interface-less routing, but the segment"
+                f" advertises no A-D routes in {ni}: the other leaves leave the hosts' MAC/IP routes unused"
+                " and route on the subnet, bridging again over the mac-vrf's VNI - set"
+                f" advertise-ifl-host-ad-routes bgp-evpn-instance {instances[0]} on ethernet-segment"
+                f" {seg.name} (esi {seg.esi})",
             )
 
 

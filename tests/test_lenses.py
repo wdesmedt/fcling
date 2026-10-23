@@ -12,7 +12,7 @@ from fcli.inventory import Node
 from fcli.lens import LensError
 from fcli.lenses import LENSES
 from fcli.reports.instances import BgpVpnInstance, NiInterface, stitched
-from fcli.reports.layer2 import VxlanInterface
+from fcli.reports.layer2 import NeighborEntry, VxlanInterface
 from fcli.reports.routing import Route
 from fcli.reports.services import Port, Service
 from fcli.topology import build
@@ -211,6 +211,39 @@ def test_a_bridged_path_to_a_segment_is_aliased_over_its_vteps() -> None:
         ("leaf1", "lag1.1", "ES-A"),
         ("leaf2", "lag1.1", "ES-A"),
     ]
+
+
+def test_a_routed_path_to_a_host_bridged_elsewhere_goes_on_in_its_mac_vrf() -> None:
+    # leaf3 has no /32 for host A, only its subnet; ARP/ND has it from EVPN, the bridge
+    # table behind the irb behind ES-A: routed into the irb, then bridged on to leaf1 and leaf2.
+    records = lens_fabric.records()
+    records["arp"].append(
+        NeighborEntry(
+            node="leaf3",
+            interface="irb0.1",
+            nis=("ipvrf-1", "macvrf-1"),
+            address="10.1.1.10",
+            mac=HOST_A,
+            origin="evpn",
+        )
+    )
+    run = LENSES["path"].run(
+        Fabric.of(lens_fabric.NODES, records), source="leaf3", destination="10.1.1.10", ni="ipvrf-1"
+    )
+    hops = [(h.hop, h.lookup, h.node, h.ni, h.outcome, h.endpoint or h.resumes_in or h.egress) for h in run]
+    assert hops[:3] == [
+        (0, 1, "leaf3", "ipvrf-1", "bridged", "macvrf-1"),
+        (0, 2, "leaf3", "macvrf-1", "tunnel", "10.0.0.1"),
+        (0, 2, "leaf3", "macvrf-1", "tunnel", "10.0.0.2"),
+    ]
+    assert [h for h in hops if h[4] in ("endpoint-reached", "delivered")] == [
+        (2, 1, "leaf1", "default", "endpoint-reached", "macvrf-1"),
+        (2, 2, "leaf1", "macvrf-1", "delivered", "lag1.1"),
+        (2, 1, "leaf2", "default", "endpoint-reached", "macvrf-1"),
+        (2, 2, "leaf2", "macvrf-1", "delivered", "lag1.1"),
+    ]
+    (bridged, *_) = run
+    assert (bridged.mac, bridged.segment, bridged.egress) == (HOST_A, "ES-A", "irb0.1")
 
 
 def test_path_says_where_it_goes_nowhere() -> None:

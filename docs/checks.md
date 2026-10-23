@@ -32,6 +32,7 @@ The management port `mgmt0` and the `mgmt` network-instance are in no report, so
 | `mtu_outlier` | a node whose fabric MTU differs from what a clear majority of the fabric uses |
 | `evpn_service_mismatch` | nodes carrying one service with a different VNI or route-targets. Nodes are compared only within an underlay they share, per BGP-VPN instance (a gateway's WAN side against other gateways), and among nodes that share a route-target. Two services under one name is a warning about the split. |
 | `es_df` | ethernet-segments down, with no designated forwarder, with nodes disagreeing on the DF, or with different multi-homing modes |
+| `es_ifl_host_ad` | a warning for a segment whose mac-vrfs route into an ip-vrf over an irb that advertises its hosts for interface-less routing (`arp evpn advertise dynamic interface-less-routing`), when the segment does not set `advertise-ifl-host-ad-routes bgp-evpn-instance <n>`. Without those A-D routes, the other leaves keep the hosts' MAC/IP routes as best but do not use them. They route to the hosts over the subnet RT5 instead, and a leaf that has the subnet but not the host bridges the traffic on over the mac-vrf's VNI. Reported on each leaf of the segment, where the fix goes. |
 | `bfd_down` | BFD sessions not up. When the far end has never answered, it asks whether BFD is enabled there. |
 | `igp_adjacency_down` | IS-IS adjacencies and OSPF neighbours not up |
 | `igp_no_adjacency` | IGP interfaces up and not passive, with nobody answering: area, level, authentication or MTU |
