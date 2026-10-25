@@ -39,7 +39,7 @@ Click a node, a cable or a client, and the panel on the right shows:
 - **Cable:** each cable's ports, state and rate in each direction, and the findings on those ports.
 - **Client:** its segment, and every attachment's node, subinterface, service, VLAN, and rates to and from it.
 
-Everything else dims, so you can see what the selection touches. Drag to pan, scroll to zoom, and press **Fit** to see the whole fabric. Drag a node, a client or a tier name (spine, leaf, clients) to move it. To move several together, Shift-click them, or Shift-drag a box around them, then drag any one; a click on empty space lets them go. The browser remembers where you put them for each lab, by its name, in every drawing of it, and **Reset** puts everything back where the layout placed it.
+Everything else dims, so you can see what the selection touches. Drag to pan, scroll to zoom, and press **Fit** to see the whole fabric. **Clients** shows or hides the clients (hidden by default; the browser remembers): hidden, they are left out of the drawing, except a selected one and those an overlay picks out, such as a service's or a path's ends. **Find** searches the nodes (by name, device type or address) and the clients (by name, label or ESI); click a match, or pick it with the arrow keys and Enter, to select it and centre the drawing on it, showing the client if they are hidden. Drag a node, a client or a tier name (spine, leaf, clients) to move it. To move several together, Shift-click them, or Shift-drag a box around them, then drag any one; a click on empty space lets them go. The browser remembers where you put them for each lab, by its name, in every drawing of it, and **Reset** puts everything back where the layout placed it.
 
 ## Incidents
 

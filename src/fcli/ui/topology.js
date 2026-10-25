@@ -195,7 +195,12 @@ function useViewport(box, { left, top, width, height }) {
   const hold = () => {
     moved.current = true;
   };
-  return { view, setView: move, fit, hold };
+  // A point of the drawing brought to the middle of the window, at the zoom it is at.
+  const centre = (p) => {
+    moved.current = true;
+    setView((v) => ({ ...v, x: size.w / 2 - p.x * v.k, y: size.h / 2 - p.y * v.k }));
+  };
+  return { view, setView: move, fit, hold, centre };
 }
 
 /** A layout with its nodes, clients and tier labels moved by `offset(key)`: {dx, dy}, or nothing to stay. */
@@ -230,7 +235,21 @@ export function Topology({
 }) {
   const traffic = paint.mode === "traffic";
   const box = useRef(null);
-  const base = useMemo(() => layout(graph), [graph]);
+  // Clients are drawn only when asked for; hidden, they are left out of the layout, but for the one
+  // selected and those an overlay picks out (a service's, a path's ends).
+  const [showClients, setShowClients] = useState(() => remembered(CLIENTS, false));
+  const toggleClients = () => {
+    setShowClients(!showClients);
+    remember(CLIENTS, !showClients);
+  };
+  const selectedClient = selected?.type === "client" ? selected.id : null;
+  const drawnGraph = useMemo(() => {
+    if (showClients) return graph;
+    const keep = new Set(overlay?.clients ?? []);
+    if (selectedClient) keep.add(selectedClient);
+    return { ...graph, clients: graph.clients.filter((c) => keep.has(c.id)) };
+  }, [graph, showClients, overlay, selectedClient]);
+  const base = useMemo(() => layout(drawnGraph), [drawnGraph]);
   // What the user moved - nodes by name, clients as "c:<id>", tier labels as "t:<component>|<tier>" -
   // as offsets from where the layout put them; kept in the browser, per lab, as other labs reuse the names.
   const lab = status?.fabric ?? "";
@@ -259,7 +278,21 @@ export function Topology({
     () => (nudge ? shifted(settled, (key) => (nudge.keys.has(key) ? nudge : null)) : settled),
     [settled, nudge],
   );
-  const { view, setView, fit, hold } = useViewport(box, settled);
+  const { view, setView, fit, hold, centre } = useViewport(box, settled);
+  // What a search picked, to centre on once it is drawn: a hidden client is laid out only once selected.
+  const [focus, setFocus] = useState(null);
+  useEffect(() => {
+    if (!focus) return;
+    const p = (focus.type === "node" ? placed.nodes : placed.clients).get(focus.id);
+    if (p) {
+      centre(p);
+      setFocus(null);
+    }
+  }, [focus, placed]);
+  const find = (hit) => {
+    onSelect({ type: hit.type, id: hit.id });
+    setFocus(hit);
+  };
   const drag = useRef(null);
   // A drag ends in a click, which is not a pick: swallowed, until the next press.
   const swallow = useRef(false);
@@ -530,7 +563,10 @@ export function Topology({
                      width=${Math.abs(band.to.x - band.from.x)} height=${Math.abs(band.to.y - band.from.y)} />`}
         </g>
       </svg>
-      <div class="map-tools" onPointerDown=${(e) => e.stopPropagation()}>
+      <div class="map-tools" onPointerDown=${(e) => e.stopPropagation()} onWheel=${(e) => e.stopPropagation()}>
+        <${Search} graph=${graph} onPick=${find} />
+        <button class=${showClients ? "on" : ""} onClick=${toggleClients} aria-pressed=${showClients}
+                title=${showClients ? "Hide the clients" : "Show the clients"}>Clients</button>
         ${Object.keys(moves).length > 0 &&
         html`<button onClick=${reset} title="Put the nodes back where the layout placed them">Reset</button>`}
         <button onClick=${fit} title="Fit the fabric to the window">Fit</button>
@@ -541,6 +577,63 @@ export function Topology({
       ${legend && html`<${Legend} paint=${paint} />`}
     </div>
   `;
+}
+
+/** Nodes and clients by name, label, address or ESI: the first few that match, to pick with a click or Enter. */
+export function searchTopology(graph, text, limit = 12) {
+  const q = text.trim().toLowerCase();
+  if (!q) return [];
+  const hit = (...fields) => fields.some((f) => f != null && String(f).toLowerCase().includes(q));
+  return [
+    ...graph.nodes
+      .filter((n) => hit(n.name, n.type, n.ipv4, n.ipv6))
+      .map((n) => ({ type: "node", id: n.name, label: n.name, sub: n.tier }))
+      .sort((a, b) => natural(a.label, b.label)),
+    ...graph.clients
+      .filter((c) => hit(c.label, c.name, c.id, c.esi))
+      .map((c) => ({ type: "client", id: c.id, label: c.label || c.name || c.id, sub: `client · ${c.nodes.join(", ")}` }))
+      .sort((a, b) => natural(a.label, b.label)),
+  ].slice(0, limit);
+}
+
+function Search({ graph, onPick }) {
+  const [text, setText] = useState("");
+  const [active, setActive] = useState(0);
+  const hits = useMemo(() => searchTopology(graph, text), [graph, text]);
+  const pick = (hit) => {
+    if (!hit) return;
+    onPick(hit);
+    setText("");
+  };
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      setActive((a) => (hits.length ? (a + step + hits.length) % hits.length : 0));
+    } else if (e.key === "Enter") {
+      pick(hits[active]);
+    } else if (e.key === "Escape") {
+      setText("");
+    }
+  };
+  return html`<div class="map-search">
+    <input type="search" placeholder="Find a node or client" value=${text} aria-label="Find a node or client"
+           onInput=${(e) => {
+             setText(e.target.value);
+             setActive(0);
+           }} onKeyDown=${onKeyDown} />
+    ${text.trim() &&
+    html`<ul class="map-hits" role="listbox">
+      ${hits.length
+        ? hits.map(
+            (h, i) => html`<li role="option" aria-selected=${i === active} class=${i === active ? "active" : ""}
+                               onMouseEnter=${() => setActive(i)} onClick=${() => pick(h)}>
+              <span>${h.label}</span><span class="muted">${h.sub}</span>
+            </li>`,
+          )
+        : html`<li class="muted">Nothing matches.</li>`}
+    </ul>`}
+  </div>`;
 }
 
 function Legend({ paint }) {
@@ -735,6 +828,8 @@ export function Details({ selection, graph, status, checks, at, onSelect }) {
 
 /** Where the user moved things to in a lab, shared by every drawing of it: "fcli-layout:<lab>". */
 const MOVES = "fcli-layout";
+/** Whether the clients are drawn: hidden unless asked for. */
+const CLIENTS = "fcli-clients";
 
 function remembered(key, fallback) {
   try {

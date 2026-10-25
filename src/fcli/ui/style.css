@@ -681,6 +681,65 @@ main.split:not(.details-collapsed) .details h2 {
   min-width: 30px;
 }
 
+.map-tools button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.map-search {
+  position: relative;
+}
+
+.map-search input {
+  width: 190px;
+  height: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.map-hits {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  min-width: 100%;
+  max-width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.map-hits li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.map-hits li .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-hits li.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .legend {
   position: absolute;
   bottom: 10px;
