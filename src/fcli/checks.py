@@ -13,6 +13,7 @@ history the store already keeps.
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
@@ -669,6 +670,77 @@ def check_es_ifl_host_ad(fabric: Fabric) -> Iterator[Finding]:
                 " and route on the subnet, bridging again over the mac-vrf's VNI - set"
                 f" advertise-ifl-host-ad-routes bgp-evpn-instance {instances[0]} on ethernet-segment"
                 f" {seg.name} (esi {seg.esi})",
+            )
+
+
+#: How a prefix behind a CE comes: over its BGP session, or as the RT5 the segment resolves.
+_ALIASED_TYPES = ("bgp", "bgp-evpn")
+
+
+def _address(value: str) -> str:
+    try:
+        return str(ipaddress.ip_address(value.split("/")[0]))
+    except ValueError:
+        return value.strip().lower()
+
+
+@check(
+    "es_l3_aliasing",
+    "Prefixes behind a virtual segment that some leaves of its ip-vrf never install",
+    ["es", "ipv4-rib", "ipv6-rib"],
+)
+def check_es_l3_aliasing(fabric: Fabric) -> Iterator[Finding]:
+    """A virtual segment tracking a next-hop makes the prefixes learned over that
+    next-hop - from a CE's BGP session, typically - RT5s carrying the segment's
+    ESI, resolved on the other leaves over its A-D routes (L3 aliasing). A leaf
+    of the ip-vrf where such a prefix is missing has the RT5 best but unused:
+    it black-holes the prefix while the leaves around it route it."""
+    # (ip-vrf, next-hop) -> the virtual segment tracking it there.
+    tracked: dict[tuple[str, str], str] = {}
+    for seg in fabric.get("es"):
+        if seg.type != "virtual" or text(seg.oper) != "up":
+            continue
+        for a in seg.associations:
+            for nh in seg.next_hops:
+                tracked.setdefault((a.ni, _address(nh.address)), seg.name)
+    if not tracked:
+        return
+    routes = [r for report in ("ipv4-rib", "ipv6-rib") for r in fabric.get(report)]
+    present: dict[str, set[tuple[str, str]]] = {}
+    holders: dict[str, set[str]] = {}
+    # (ip-vrf, segment) -> prefix -> the nodes routing it over the tracked next-hop.
+    aliased: dict[tuple[str, str], dict[str, set[str]]] = {}
+    for r in routes:
+        holders.setdefault(r.ni, set()).add(r.node)
+        if not r.active:
+            continue
+        present.setdefault(r.node, set()).add((r.ni, r.prefix))
+        # The tracked host itself, learned over ARP or EVPN, is the next-hop, not behind it.
+        if r.type not in _ALIASED_TYPES:
+            continue
+        for nh in r.next_hops:
+            seg_name = tracked.get((r.ni, _address(nh.address)))
+            if seg_name is not None and _address(r.prefix) != _address(nh.address):
+                aliased.setdefault((r.ni, seg_name), {}).setdefault(r.prefix, set()).add(r.node)
+    segments = {seg.name: seg for seg in fabric.get("es") if seg.type == "virtual"}
+    for (ni, seg_name), prefixes in sorted(aliased.items()):
+        seg = segments[seg_name]
+        having = set().union(*prefixes.values())
+        for node in sorted(holders.get(ni, set()) - having):
+            missing = sorted(p for p in prefixes if (ni, p) not in present.get(node, set()))
+            if not missing:
+                continue
+            shown = ", ".join(missing[:5]) + (f" and {len(missing) - 5} more" if len(missing) > 5 else "")
+            yield _f(
+                "es_l3_aliasing",
+                ERROR,
+                node,
+                f"{seg_name}/{ni}",
+                f"{shown} behind virtual segment {seg_name} (esi {seg.esi}, next-hop"
+                f" {' '.join(nh.address for nh in seg.next_hops)}) {'is' if len(missing) == 1 else 'are'}"
+                f" installed on {', '.join(sorted(having))} and missing from {ni} here: the RT5"
+                " carrying the segment's ESI is not resolved over its A-D routes (best, not used),"
+                " a known SR Linux fault with L3 aliasing",
             )
 
 

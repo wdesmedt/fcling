@@ -803,18 +803,20 @@ def checks_command(settings: Settings, names: tuple[str, ...], at: str | None) -
         return
     from rich import box as rich_box
     from rich.table import Table
+    from rich.text import Text
 
     table = Table(box=getattr(rich_box, settings.box.upper(), rich_box.MINIMAL), title="Checks")
     for column in ("severity", "check", "node", "subject", "detail", "since"):
         table.add_column(column)
     for f in rows:
         style = _SEVERITY_STYLE.get(f["severity"], "")
+        # As they are: an ESI's ":ab:" is no emoji, a path's "[...]" no markup.
         table.add_row(
             f"[{style}]{f['severity']}[/]",
             f["check"],
             f["node"],
-            f["subject"],
-            f["detail"],
+            Text(f["subject"]),
+            Text(f["detail"]),
             _when(f.get("raised")),
         )
     Console().print(table if rows else "[green]No findings.[/]")

@@ -13,7 +13,7 @@ from fcli.reports.health import BfdSession
 from fcli.reports.instances import NiInterface
 from fcli.reports.interfaces import Subinterface
 from fcli.reports.lldp import LldpNeighbor
-from fcli.reports.routing import Route
+from fcli.reports.routing import Route, RouteNextHop
 
 from .fabric_replay import recorded_fabric
 from .replay import RELEASES
@@ -184,6 +184,7 @@ from fcli.reports.interfaces import InterfaceStats  # noqa: E402
 from fcli.reports.layer2 import (  # noqa: E402
     DfCandidate,
     EsAssociation,
+    EsNextHop,
     EthernetSegment,
     IrbInterface,
     NeighborSettings,
@@ -844,6 +845,58 @@ def test_es_ifl_host_ad_wants_the_ip_vrf_s_own_bgp_evpn_instance() -> None:
         "ES-HOST2/ipvrf-1",
         "ES-HOST2/ipvrf-1",
     ]
+
+
+def _aliasing(installed: Iterable[str] = ("leaf1", "leaf2", "leaf3", "leaf4")) -> Fabric:
+    """vm1 (10.1.4.16) is on virtual es-vm1 of ipvrf-1 behind leaf1 and leaf2; it peers
+    with leaf3 over BGP and announces 6.6.6.1/32. Every leaf carries ipvrf-1."""
+    nodes = ("leaf1", "leaf2", "leaf3", "leaf4")
+    es = [
+        EthernetSegment(
+            node=node,
+            name="es-vm1",
+            esi="00:fe:2f:ab:00:00:01:00:00:00",
+            type="virtual",
+            mh_mode="all-active",
+            oper="up",
+            next_hops=(EsNextHop(address="10.1.4.16", evis=("5001",)),),
+            associations=(EsAssociation(ni="ipvrf-1", candidates=_candidates("192.0.2.1", "192.0.2.2(DF)")),),
+        )
+        for node in nodes
+    ]
+    vm1 = (RouteNextHop(address="10.1.4.16", type="indirect"),)
+    rib = [Route(node=n, ni="ipvrf-1", prefix="10.1.4.0/24", type="local", active=True) for n in nodes]
+    # The tracked host itself: its next-hop is its own address, it is no prefix behind it.
+    rib.append(
+        Route(node="leaf2", ni="ipvrf-1", prefix="10.1.4.16/32", type="arp-nd", active=True, next_hops=vm1)
+    )
+    for node in installed:
+        kind = "bgp" if node == "leaf3" else "bgp-evpn"
+        rib.append(Route(node=node, ni="ipvrf-1", prefix="6.6.6.1/32", type=kind, active=True, next_hops=vm1))
+    return fab({"es": es, "ipv4-rib": rib, "ipv6-rib": []})
+
+
+def test_es_l3_aliasing_says_nothing_when_every_leaf_of_the_ip_vrf_installs_the_prefix() -> None:
+    assert run("es_l3_aliasing", _aliasing()) == []
+
+
+def test_es_l3_aliasing_finds_a_leaf_that_never_installs_an_aliased_prefix() -> None:
+    (finding,) = run("es_l3_aliasing", _aliasing(installed=("leaf1", "leaf2", "leaf3")))
+    assert (finding.node, finding.severity, finding.subject) == ("leaf4", ERROR, "es-vm1/ipvrf-1")
+    assert "6.6.6.1/32" in finding.detail and "leaf1, leaf2, leaf3" in finding.detail
+
+
+def test_es_l3_aliasing_does_not_count_the_tracked_host_as_behind_itself() -> None:
+    assert (
+        "10.1.4.16/32"
+        not in run("es_l3_aliasing", _aliasing(installed=("leaf1", "leaf2", "leaf3")))[0].detail
+    )
+
+
+def test_es_l3_aliasing_ignores_a_segment_on_ports() -> None:
+    fabric = _aliasing(installed=("leaf3",))
+    es = [seg.model_copy(update={"type": "none"}) for seg in fabric.get("es")]
+    assert run("es_l3_aliasing", fab({**fabric.records, "es": es})) == []
 
 
 # --------------------------------------------------------------------------- running them together
