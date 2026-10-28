@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from fcli.checks import Finding
 from fcli.fabric import Fabric
@@ -286,3 +289,34 @@ def test_no_finding_is_lost_by_being_grouped() -> None:
     assert sorted(findings_of(correlate(findings, fab(nodes=["leaf1", "leaf2"]))), key=repr) == sorted(
         findings, key=repr
     )
+
+
+def test_the_cli_prints_an_esi_as_it_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Rich would show ":ab:" and ":cd:" as emoji, and "[...]" as markup.
+    from click.testing import CliRunner
+
+    from fcli.cli import main
+    from fcli.incidents import Incident
+
+    esi = "01:ab:cd:00:00:00:00:00:00:01"
+    root = finding("ethernet_segment", "leaf1", f"esi {esi}", "no peer in [mh-1]")
+    incident = Incident(
+        id="x",
+        severity="error",
+        kind="segment",
+        title=f"segment {esi} alone",
+        node="leaf1",
+        nodes=("leaf1",),
+        root=root,
+        explanation=f"{esi} has one leaf",
+    )
+    monkeypatch.setattr("fcli.cli._fabric_view", lambda settings, at: None)
+    monkeypatch.setattr("fcli.cli.run_checks", lambda fabric: [])
+    monkeypatch.setattr("fcli.cli.correlate", lambda findings, fabric: [incident])
+    inventory = tmp_path / "inv.yml"
+    inventory.write_text("name: lab\nnodes: {leaf1: {address: 127.0.0.1}}\n")
+    result = CliRunner().invoke(main, ["-c", str(inventory), "incidents", "-v"])
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert f"segment {esi} alone" in output and f"{esi} has one leaf" in output
+    assert f"esi {esi}: no peer in [mh-1]" in output

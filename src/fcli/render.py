@@ -215,7 +215,12 @@ def table(
         if previous is not None and record.node != previous:
             t.add_section()
         node = record.node if record.node != previous else ""
-        t.add_row(node, *(text(column.value(record)) for column in columns))
+        # As they are: an ESI's ":ab:" is no emoji, a path's "[...]" no markup.
+        cells = (
+            console.render_str(text(column.value(record)), markup=False, emoji=False, highlight=True)
+            for column in columns
+        )
+        t.add_row(node, *cells)
         previous = record.node
     console.print(t)
 
