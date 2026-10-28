@@ -21,6 +21,7 @@ from typing import Any
 
 import click
 from rich.console import Console
+from rich.markup import escape
 
 from . import inventory as inv
 from . import render, views
@@ -39,7 +40,8 @@ try:
 except ImportError:  # running from a checkout that was never built
     __version__ = "0.0.0"
 
-err = Console(stderr=True)
+# No emoji: a MAC's or an ESI's ":ab:" is none; data in markup is escaped.
+err = Console(stderr=True, emoji=False)
 
 
 @dataclass
@@ -292,7 +294,7 @@ def _run(
     records, errors = _collect(settings, report, params, interval, at)
     records = [r for r in records if render.keep(report, r, filters)]
     if settings.output == "table":
-        render.table(report, records, Console(), settings.box, detail)
+        render.table(report, records, Console(emoji=False), settings.box, detail)
     elif settings.output == "json":
         click.echo(render.as_json(records))
     elif settings.output == "yaml":
@@ -300,7 +302,7 @@ def _run(
     else:
         click.echo(render.as_csv(report, records, detail), nl=False)
     for node, error in sorted(errors.items()):
-        err.print(f"[yellow]{node}[/]: {error}", highlight=False)
+        err.print(f"[yellow]{node}[/]: {escape(str(error))}", highlight=False)
     if errors:
         sys.exit(1)
 
@@ -609,6 +611,7 @@ def _print_changes(changes: list[dict[str, Any]], output: str) -> None:
         return
     from rich import box as rich_box
     from rich.table import Table
+    from rich.text import Text
 
     table = Table(box=rich_box.MINIMAL, title="History")
     for column in ("time", "node", "report", "op", "key", "what", "after"):
@@ -619,11 +622,11 @@ def _print_changes(changes: list[dict[str, Any]], output: str) -> None:
             c["node"],
             c["report"],
             finding_event(c) or c["op"],
-            c["key"],
-            _summary(c),
-            c.get("cause", ""),
+            Text(str(c["key"])),
+            Text(_summary(c)),
+            Text(c.get("cause") or ""),
         )
-    Console().print(table)
+    Console(emoji=False).print(table)
 
 
 @main.command()
@@ -700,7 +703,9 @@ def history(
                     if not match or matches(event, match):
                         _print_changes([event], settings.output)
                 elif event.get("type") == "node":
-                    err.print(f"[dim]{event['name']}: {event['status']} {event.get('error', '')}[/]")
+                    err.print(
+                        f"[dim]{event['name']}: {event['status']} {escape(str(event.get('error', '')))}[/]"
+                    )
         except KeyboardInterrupt:
             pass
         except RemoteError as exc:
@@ -819,7 +824,7 @@ def checks_command(settings: Settings, names: tuple[str, ...], at: str | None) -
             Text(f["detail"]),
             _when(f.get("raised")),
         )
-    Console().print(table if rows else "[green]No findings.[/]")
+    Console(emoji=False).print(table if rows else "[green]No findings.[/]")
     if any(f["severity"] == "error" for f in rows):
         sys.exit(1)
 
@@ -839,7 +844,7 @@ def incidents_command(settings: Settings, verbose: bool, at: str | None) -> None
         return
     from rich.text import Text
 
-    console = Console()
+    console = Console(emoji=False)
     if not found:
         console.print("[green]No incidents.[/]")
         return
@@ -954,7 +959,7 @@ def drift(settings: Settings, since: str, until: str | None, reports: tuple[str,
     if _dump(changes, settings.output):
         return
     if not changes:
-        Console().print("[green]No drift.[/]")
+        Console(emoji=False).print("[green]No drift.[/]")
         return
     _print_changes(changes, "table")
 
@@ -1029,13 +1034,16 @@ def _print_config_diff(answer: dict[str, Any]) -> None:
     from rich.table import Table
     from rich.text import Text
 
-    console = Console()
+    console = Console(emoji=False)
     spans = ", ".join(
         f"{c.get('id')} by {c.get('username') or '?'}" + (f" ({c['comment']})" if c.get("comment") else "")
         for c in answer["commits"]
     )
     before, after = answer["before"], answer["after"]
-    console.print(f"[bold]{answer['node']}[/]: {answer['summary']}" + (f" — commit {spans}" if spans else ""))
+    console.print(
+        f"[bold]{answer['node']}[/]: {escape(answer['summary'])}"
+        + (f" — commit {escape(spans)}" if spans else "")
+    )
     if before is None:
         console.print("[dim]nothing kept before it to compare with[/]")
         return
@@ -1145,7 +1153,7 @@ def ask(
     Needs a model provider's key: ANTHROPIC_API_KEY (or `ant auth login`),
     OPENAI_API_KEY (and OPENAI_BASE_URL for a compatible proxy) or XAI_API_KEY.
     """
-    console = Console()
+    console = Console(emoji=False)
     remote = settings.remote()
     failed = False
     if remote is not None:
@@ -1248,7 +1256,7 @@ def _lens_command(spec: Any) -> click.Command:
         records = [spec.record.model_validate(r) for r in answer["records"]]
         records = [r for r in records if render.keep(spec, r, filters)]
         if settings.output == "table":
-            render.table(spec, records, Console(), settings.box)
+            render.table(spec, records, Console(emoji=False), settings.box)
         elif settings.output == "json":
             click.echo(render.as_json(records, spec))
         elif settings.output == "yaml":
@@ -1307,13 +1315,15 @@ def topology(settings: Settings, at: str | None) -> None:
         raise click.UsageError(str(exc)) from exc
     if _dump(graph, settings.output):
         return
-    _print_topology(graph, Console())
+    _print_topology(graph, Console(emoji=False))
 
 
 _HEALTH_MARK = {"error": "[bold red]![/]", "warning": "[yellow]~[/]", "ok": ""}
 
 
 def _print_topology(graph: dict[str, Any], console: Console) -> None:
+    from rich.text import Text
+
     nodes = {n["name"]: n for n in graph["nodes"]}
     for component in graph["components"]:
         members = component["nodes"]
@@ -1338,8 +1348,10 @@ def _print_topology(graph: dict[str, Any], console: Console) -> None:
                 for c in x["cables"]:
                     if c["state"] != "up":
                         console.print(
-                            f"    {x['a']} {c['a_port']} <-> {x['b']} {c['b_port']}  [red]{c['state']}[/]",
-                            highlight=False,
+                            Text.assemble(
+                                f"    {x['a']} {c['a_port']} <-> {x['b']} {c['b_port']}  ",
+                                (c["state"], "red"),
+                            )
                         )
         if clients:
             console.print("  [dim]clients[/]")
@@ -1347,17 +1359,14 @@ def _print_topology(graph: dict[str, Any], console: Console) -> None:
                 services = sorted({a["service"] for a in c["attachments"]})
                 ports = ", ".join(sorted({f"{a['node']} {a['port']}" for a in c["attachments"]}))
                 es = f"  ES {c['esi']}" if c["esi"] else ""
-                console.print(
-                    f"    {c['label']}: {ports}{es}  [dim]{', '.join(services)}[/]",
-                    highlight=False,
-                )
+                console.print(Text.assemble(f"    {c['label']}: {ports}{es}  ", (", ".join(services), "dim")))
     segments = graph["segments"]
     if segments:
         console.print("[bold]segments[/]")
         for s in segments:
             where = ", ".join(f"{n['node']} {' '.join(n['interfaces']) or '-'}" for n in s["nodes"])
             nh = f"  next-hop {', '.join(s['next_hops'])}" if s["next_hops"] else ""
-            console.print(f"  {'/'.join(s['names']) or s['esi']}  {s['mode']}  {where}{nh}", highlight=False)
+            console.print(Text(f"  {'/'.join(s['names']) or s['esi']}  {s['mode']}  {where}{nh}"))
     if graph["outside"]:
         console.print(
             "[bold]outside[/]  "
