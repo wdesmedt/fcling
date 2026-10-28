@@ -837,6 +837,8 @@ def incidents_command(settings: Settings, verbose: bool, at: str | None) -> None
         found = [i.as_dict() for i in correlate(run_checks(fabric), fabric)]
     if _dump(found, settings.output):
         return
+    from rich.text import Text
+
     console = Console()
     if not found:
         console.print("[green]No incidents.[/]")
@@ -844,17 +846,21 @@ def incidents_command(settings: Settings, verbose: bool, at: str | None) -> None
     for i in found:
         style = _SEVERITY_STYLE.get(i["severity"], "")
         count = 1 + len(i["related"])
-        since = f"  [dim]since {_when(i['first_seen'])}[/]" if i.get("first_seen") else ""
+        # As they are: an ESI's ":ab:" is no emoji, a path's "[...]" no markup.
         console.print(
-            f"[{style}]{i['severity'].upper():7}[/] [bold]{i['title']}[/]  "
-            f"[dim]({count} finding{'s' if count != 1 else ''})[/]{since}"
+            Text.assemble(
+                (f"{i['severity'].upper():7}", style),
+                " ",
+                (i["title"], "bold"),
+                (f"  ({count} finding{'s' if count != 1 else ''})", "dim"),
+                (f"  since {_when(i['first_seen'])}" if i.get("first_seen") else "", "dim"),
+            )
         )
-        console.print(f"        {i['explanation']}", highlight=False)
+        console.print(Text(f"        {i['explanation']}"))
         if verbose:
             for f in [i["root"], *i["related"]]:
                 console.print(
-                    f"          [dim]{f['check']:20} {f['node']:12} {f['subject']}: {f['detail']}[/]",
-                    highlight=False,
+                    Text(f"          {f['check']:20} {f['node']:12} {f['subject']}: {f['detail']}", "dim")
                 )
     if any(i["severity"] == "error" for i in found):
         sys.exit(1)
