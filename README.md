@@ -1,16 +1,18 @@
-# fcli
+# fcling
 
 [![ci](https://github.com/wdesmedt/fcling/actions/workflows/ci.yml/badge.svg)](https://github.com/wdesmedt/fcling/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/fcling)](https://pypi.org/project/fcling/)
 
 What an SR Linux fabric looks like, what is wrong with it, and what changed, straight from gNMI.
 
-This is a ground-up rewrite of [fcli](https://github.com/srl-labs/fcli). It runs on asyncio throughout, uses no Nornir and makes no blocking gNMI calls.
+This is a ground-up rewrite of [fcli](https://github.com/srl-labs/fcli). It runs on asyncio throughout, uses no Nornir and makes no blocking gNMI calls. On top of fcli's reports, it adds a streaming engine with history, fabric checks grouped into incidents, fabric-wide lenses, a web UI, and an MCP server and agent.
+
+It needs Python 3.11 or later, and gNMI enabled on the nodes. It is tested against SR Linux 25.3 to 26.7.
 
 Install the `fcling` command once, then run it from anywhere:
 
 ```bash
-uv tool install fcling          # from PyPI; or `uv tool install .` from a checkout
+uv tool install fcling          # or `pipx install fcling`; `uv tool install .` from a checkout
 ```
 
 Or run it with Docker, without installing anything:
@@ -40,6 +42,8 @@ fcling bgp-peers --at 14:02                           # as it was then
 fcling history --since 1h -r bgp-peers --follow       # what changed, which commit did it, and keeps watching
 ```
 
+`fcling serve` also serves a web UI at <http://127.0.0.1:8765/>: the topology, incidents, history, lenses, every report and the agent, in a browser.
+
 What is wrong, and what changed:
 
 ```bash
@@ -56,8 +60,8 @@ Ask, or let your own AI client ask. Both get the same 14 read-only tools: status
 ```bash
 fcling ask "what is wrong, and what changed just before?"        # the first provider with a key
 fcling ask --provider openai --effort low "is BGP healthy?"
-claude mcp add --transport http fcli http://127.0.0.1:8765/mcp        # MCP over HTTP from `fcling serve`
-claude mcp add fcli -- fcling --server http://127.0.0.1:8765 mcp        # or over stdio
+claude mcp add --transport http fcling http://127.0.0.1:8765/mcp        # MCP over HTTP from `fcling serve`
+claude mcp add fcling -- fcling --server http://127.0.0.1:8765 mcp        # or over stdio
 ```
 
 Questions across the whole fabric, and its shape:
@@ -88,67 +92,30 @@ Reports: `sys-info`, `config-commits`, `lldp`, `subif`, `lag`, `ifstats`, `ni`, 
 | [MCP and the agent](docs/ai.md) | the tools, MCP setup, `fcling ask`, Claude, OpenAI and Grok |
 | [Architecture](docs/architecture.md) | how it fits together, adding a report or a check, the tests |
 
-## Architecture
+## How it works
 
 ```
-inventory ──► collect ──► gNMI Get (one per datatype, all nodes at once)
-                              │
-                              ▼
-                        Tree (per node)  ◄── later: gNMI Subscribe, same tree
-                              │
-                              ▼
-            report: pure function Tree → typed records
-                              │
-                              ▼
-                 render: table · json · yaml · csv
+inventory ──► collect (one-shot) ──┐
+          └─► engine (streaming) ──┼──► Tree per node ──► reports ──► records ──► render / API / tools
+                                   │                         ▲
+            history (SQLite) ◄─────┘   checks over all nodes ┘──► findings ──► incidents
 ```
 
-| Module | Role |
-|---|---|
-| [gnmi/client.py](src/fcli/gnmi/client.py) | `grpc.aio` client for Capabilities, Get and Subscribe. TLS can be verified, trust-on-first-use (`skip_verify`) or plaintext. Errors are worded around the node. |
-| [gnmi/path.py](src/fcli/gnmi/path.py) | Paths as hashable values, parsed once. Module prefixes are dropped. |
-| [tree.py](src/fcli/tree.py) | A node's state as plain JSON. Get payloads and subscription leaves merge into it, with list entries matched by key. |
-| [report.py](src/fcli/report.py) | `@report(name, reads=[Read(path, datatype, mode)], record=..., columns=...)`. A report declares its paths and never does I/O. |
-| `follow` | Optional pure function `(tree, params) -> reads` for dependent reads: the next-hop-groups the routes name, the BGP attribute sets of the paths shown. The collector calls it again until it asks for nothing new. It fetches by key, or the whole table above a limit. |
-| `Param` | An argument that shapes what a report builds (`ipv4-rib -a <address>`, `bgp-rib --paths all`). The CLI turns each one into an option. |
-| [reports/](src/fcli/reports/) | The report definitions. Records are flat, frozen pydantic models: one record is one row. |
-| [collect.py](src/fcli/collect.py) | One-shot engine. Each node is one task, and a node fails on its own. A path a node does not know reads as empty. |
-| [inventory.py](src/fcli/inventory.py) | Loads a containerlab topology or a static YAML inventory, with `key=glob` filters. |
-| [engine.py](src/fcli/engine.py) | Long-running engine. ON_CHANGE reads are streamed in Subscribe RPCs of at most 36 paths, the most SR Linux accepts, each with a heartbeat. SAMPLE reads (counters) are polled, and each polled subtree is replaced whole: a SAMPLE stream never says what is gone. `follow` reads are fetched by key. A reconnect resyncs into a fresh tree. An update only re-runs the reports whose paths it overlaps. |
-| [delta.py](src/fcli/delta.py) | Changes record by record, matched on each record's `key`. A change confined to `volatile` fields (counters, rates) is pushed live but not kept. |
-| [store.py](src/fcli/store.py) | SQLite: an append-only change log plus the current state. A restart diffs against it, and the state at any instant is a fold back from now. |
-| [checks.py](src/fcli/checks.py) | 19 fabric checks: pure functions of a `Fabric` (every node's records) to `Finding` records. In the engine, findings are a report like any other, so each one raised or cleared is history. |
-| [incidents.py](src/fcli/incidents.py) | Findings anchored to what they are about (a cable, a session, a node, the underlay between two nodes) and grouped by root cause. The same cause in many places folds into one pattern. |
-| [views.py](src/fcli/views.py) | One place for fabric-wide answers from any source (the nodes now, the engine, the history at an instant): checks, incidents, drift, and history attributed to the configuration commit that preceded it. |
-| [service.py](src/fcli/service.py) | The questions every surface asks, behind one interface with three implementations: the engine in this process, a running server over HTTP, or the nodes one-shot. |
-| [tools.py](src/fcli/tools.py) | 14 read-only tools over a Service. Inputs are pydantic models that are validated before anything runs; outputs are compact JSON with row limits. One definition serves both MCP clients and the agent. |
-| [mcp.py](src/fcli/mcp.py) | The tools as an MCP server: streamable HTTP at `/mcp` on `fcling serve` (stateless, with DNS-rebinding protection on localhost), or stdio via `fcling mcp`. |
-| [agent.py](src/fcli/agent.py) | The in-app agent, provider-neutral: streaming, concurrent tool calls, and append-only conversations kept server-side in the provider's own format. |
-| [llm.py](src/fcli/llm.py) | The providers. **Claude** (Anthropic SDK): adaptive thinking, cached prompt and tools, server-side refusal fallback, `claude-opus-5-5` at `medium`. **OpenAI** (Responses API: `store` off, reasoning replayed encrypted), `gpt-5.6-sol`. `OPENAI_API=chat` switches to Chat Completions for proxies. **Grok** (Chat Completions at api.x.ai), `grok-4.6`. The provider is `FCLI_LLM_PROVIDER` or the first one with a key, Claude first; model and effort come from `FCLI_MODEL` / `FCLI_EFFORT` or each provider's own variables. |
-| [server.py](src/fcli/server.py) | Starlette: `/api/status`, `/api/reports[/{name}]` (live, `?at=` or collected on the spot), `/api/history`, `/api/events` (SSE, resumable with `Last-Event-ID`). Bound to localhost; a bearer token when it isn't. |
+- **A report never does I/O.** It declares the gNMI paths it reads and builds typed records from a tree. The same definition runs one-shot (a Get per datatype, every node at once), streamed (Subscribe in `fcling serve`) and on recordings in the tests.
+- **Records are flat, frozen pydantic models.** One record is one row. It gives the JSON output, the schema that MCP clients and the API publish, and the key that history and drift compare by.
+- **Every surface goes through one Service and one tool layer.** The CLI, the HTTP API, the web UI, MCP and the agent all see the same fabric.
 
-Because a report only declares paths, the same definition can be fed by a one-shot Get (CLI), by a STREAM subscription (server) or by a recording (tests). Its subscription plan is static data that can be checked without a device.
+[docs/architecture.md](docs/architecture.md) has the module map, and covers adding a report or a check.
 
-### Static inventory
-
-```yaml
-defaults:
-  username: admin
-  password: NokiaSrl1!
-  tls: {ca_file: ca.pem}      # or {skip_verify: true} / {insecure: true}
-nodes:
-  leaf1: {address: 10.0.0.11, labels: {role: leaf}}
-  spine1: {address: 10.0.0.21, labels: {role: spine}}
-```
-
-## Tests
+## Development
 
 ```bash
-make test lint
+make test lint          # pytest, then ruff and mypy
+make proto              # regenerate the gNMI stubs (they are committed)
 ```
 
-[tests/fixtures/releases](tests/fixtures/releases/) holds real gNMI recordings from the original fcli for SR Linux 25.3 to 26.7. [test_release_matrix.py](tests/test_release_matrix.py) replays them through the new reports and requires row-for-row equality with what the original rendered. [fake_gnmi.py](tests/fake_gnmi.py) is an in-process gNMI target, so the client, TLS, the collector and the CLI are tested without a lab.
+No lab is needed. [tests/fixtures/releases](tests/fixtures/releases/) holds real gNMI recordings from SR Linux 25.3 to 26.7, made with the original fcli. [test_release_matrix.py](tests/test_release_matrix.py) replays them through the new reports and requires the same rows the original rendered. [fake_gnmi.py](tests/fake_gnmi.py) is an in-process gNMI target that the client, TLS, the collector, the engine, the server and the CLI are tested against. [MATRIX.md](tests/fixtures/releases/MATRIX.md) explains what each set of recordings checks.
 
-[test_engine.py](tests/test_engine.py) and [test_server.py](tests/test_server.py) stream from that same fake target. They cover the initial sync, refused paths, live changes and deletes, history and `state_at`, and SSE replay over a real uvicorn.
+## License
 
-The gNMI stubs are generated from the openconfig protos (`make proto`) and committed.
+BSD-3-Clause, see [LICENSE](LICENSE).
